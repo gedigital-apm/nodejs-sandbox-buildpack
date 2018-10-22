@@ -18,10 +18,6 @@ type Manifest interface {
 	//TODO: See more options at https://github.com/cloudfoundry/libbuildpack/blob/master/manifest.go
 	AllDependencyVersions(string) []string
 	DefaultVersion(string) (libbuildpack.Dependency, error)
-}
-
-type Installer interface {
-	//TODO: See more options at https://github.com/cloudfoundry/libbuildpack/blob/master/installer.go
 	InstallDependency(libbuildpack.Dependency, string) error
 	InstallOnlyVersion(string, string) error
 }
@@ -33,11 +29,10 @@ type Command interface {
 }
 
 type Supplier struct {
-	Manifest  Manifest
-	Installer Installer
-	Stager    Stager
-	Command   Command
-	Log       *libbuildpack.Logger
+	Manifest Manifest
+	Stager   Stager
+	Command  Command
+	Log      *libbuildpack.Logger
 }
 
 func (s *Supplier) Run() error {

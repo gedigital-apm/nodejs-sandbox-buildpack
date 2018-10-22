@@ -3,8 +3,6 @@ package libbuildpack_test
 import (
 	"bytes"
 	"os/exec"
-	"path/filepath"
-	"runtime"
 
 	bp "github.com/cloudfoundry/libbuildpack"
 	. "github.com/onsi/ginkgo"
@@ -25,13 +23,8 @@ var _ = Describe("Command", func() {
 
 	Context("valid command", func() {
 		BeforeEach(func() {
-			if runtime.GOOS == "windows" {
-				exe = "cmd.exe"
-				args = []string{"/c", "dir", "fixtures"}
-			} else {
-				exe = "ls"
-				args = []string{"-l", "fixtures"}
-			}
+			exe = "ls"
+			args = []string{"-l", "fixtures"}
 		})
 
 		It("runs the command with the output in the right location", func() {
@@ -43,32 +36,23 @@ var _ = Describe("Command", func() {
 	})
 	Context("changing directory", func() {
 		BeforeEach(func() {
-			if runtime.GOOS == "windows" {
-				exe = "cmd.exe"
-				args = []string{"/c", "cd"}
-			} else {
-				exe = "pwd"
-				args = []string{}
-			}
+			exe = "pwd"
+			args = []string{}
 		})
 
 		It("runs the command with the output in the right location", func() {
 			err := cmd.Execute("fixtures", buffer, buffer, exe, args...)
 			Expect(err).To(BeNil())
 
-			Expect(buffer.String()).To(ContainSubstring(filepath.Join("libbuildpack", "fixtures")))
+			Expect(buffer.String()).To(ContainSubstring("libbuildpack/fixtures"))
 		})
 	})
 
 	Context("invalid command", func() {
 		BeforeEach(func() {
-			if runtime.GOOS == "windows" {
-				exe = "cmd.exe"
-				args = []string{"/c", "dir", filepath.Join("not", "a", "dir")}
-			} else {
-				exe = "ls"
-				args = []string{"-l", filepath.Join("not", "a", "dir")}
-			}
+			exe = "ls"
+			args = []string{"-l", "not/a/dir"}
+
 		})
 
 		It("runs the command and returns an eror", func() {
@@ -77,11 +61,7 @@ var _ = Describe("Command", func() {
 			_, ok := err.(*exec.ExitError)
 			Expect(ok).To(BeTrue())
 
-			if runtime.GOOS == "windows" {
-				Expect(buffer.String()).To(ContainSubstring("The system cannot find the path specified."))
-			} else {
-				Expect(buffer.String()).To(ContainSubstring("No such file or directory"))
-			}
+			Expect(buffer.String()).To(ContainSubstring("No such file or directory"))
 		})
 	})
 })
