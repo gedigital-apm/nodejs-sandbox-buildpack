@@ -1,77 +1,55 @@
 # Cloud Foundry Node.js Buildpack
-
-[![CF Slack](https://www.google.com/s2/favicons?domain=www.slack.com) Join us on Slack](https://cloudfoundry.slack.com/messages/buildpacks/)
+[![CF Slack](https://www.google.com/s2/favicons?domain=www.slack.com) Join us on Slack](http://slack.cloudfoundry.org)
 
 A Cloud Foundry [buildpack](http://docs.cloudfoundry.org/buildpacks/) for Node based apps.
 
+This is based on the [Heroku buildpack] (https://github.com/heroku/heroku-buildpack-nodejs).
+
+Additional documentation can be found at the [CloudFoundry.org](http://docs.cloudfoundry.org/buildpacks/node/index.html).
+
 ### Buildpack User Documentation
 
-Official buildpack documentation can be found at [node buildpack docs](http://docs.cloudfoundry.org/buildpacks/node/index.html).
+Official buildpack documentation can be found at http://docs.cloudfoundry.org/buildpacks/node/index.html).
 
 ### Building the Buildpack
 
-To build this buildpack, run the following commands from the buildpack's directory:
+1. Make sure you have fetched submodules
 
-1. Source the .envrc file in the buildpack directory.
+  ```bash
+  git submodule update --init
+  ```
 
-   ```bash
-   source .envrc
-   ```
-   To simplify the process in the future, install [direnv](https://direnv.net/) which will automatically source .envrc when you change directories.
+1. Get latest buildpack dependencies
 
-1. Install buildpack-packager
-
-    ```bash
-    (cd src/nodejs/vendor/github.com/cloudfoundry/libbuildpack/packager/buildpack-packager && go install)
-    ```
+  ```shell
+  BUNDLE_GEMFILE=cf.Gemfile bundle
+  ```
 
 1. Build the buildpack
 
-    ```bash
-    buildpack-packager build [ --cached=(true|false) ]
-    ```
+  ```shell
+  BUNDLE_GEMFILE=cf.Gemfile bundle exec buildpack-packager [ --cached | --uncached ]
+  ```
 
 1. Use in Cloud Foundry
 
-   Upload the buildpack to your Cloud Foundry and optionally specify it by name
+  Upload the buildpack to your Cloud Foundry and optionally specify it by name
 
-    ```bash
-    cf create-buildpack [BUILDPACK_NAME] [BUILDPACK_ZIP_FILE_PATH] 1
-    cf push my_app [-b BUILDPACK_NAME]
-    ```
+  ```bash
+  cf create-buildpack custom_node_buildpack node_buildpack-offline-custom.zip 1
+  cf push my_app -b custom_node_buildpack
+  ```
 
 ### Testing
+Buildpacks use the [Machete](https://github.com/cloudfoundry/machete) framework for running integration tests.
 
-Buildpacks use the [Cutlass](https://github.com/cloudfoundry/libbuildpack/tree/master/cutlass) framework for running integration tests.
+To test a buildpack, run the following command from the buildpack's directory:
 
-To test this buildpack, run the following command from the buildpack's directory:
+```
+BUNDLE_GEMFILE=cf.Gemfile bundle exec buildpack-build
+```
 
-1. Source the .envrc file in the buildpack directory.
-
-   ```bash
-   source .envrc
-   ```
-   To simplify the process in the future, install [direnv](https://direnv.net/) which will automatically source .envrc when you change directories.
-
-1. Run unit tests
-
-    ```bash
-    ./scripts/unit.sh
-    ```
-
-1. Run integration tests
-
-   Buildpacks use the [Cutlass](https://github.com/cloudfoundry/libbuildpack/tree/master/cutlass) framework for running integration tests against Cloud Foundry. Before running the integration tests, you need to login to your Cloud Foundry using the [cf cli](https://github.com/cloudfoundry/cli):
-   
-    ```bash
-    cf login -a https://api.your-cf.com -u name@example.com -p pa55woRD
-    ```
-    
-   Note that your user requires permissions to run `cf create-buildpack` and `cf update-buildpack`. To run the integration tests, run the following command from the buildpack's directory:
-    
-    ```bash
-    ./scripts/integration.sh
-    ```
+More options can be found on Machete's [GitHub page.](https://github.com/cloudfoundry/machete)
 
 ### Contributing
 
@@ -79,16 +57,12 @@ Find our guidelines [here](./CONTRIBUTING.md).
 
 ### Help and Support
 
-Join the #buildpacks channel in our [Slack community](http://slack.cloudfoundry.org/).
+Join the #buildpacks channel in our [Slack community] (http://slack.cloudfoundry.org/)
 
 ### Reporting Issues
 
-Open an issue on this project.
+Open an issue on this project
 
 ### Active Development
 
-The project backlog is on [Pivotal Tracker](https://www.pivotaltracker.com/projects/1042066).
-
-### Acknowledgements
-
-Inspired by the [Heroku buildpack](https://github.com/heroku/heroku-buildpack-nodejs).
+The project backlog is on [Pivotal Tracker](https://www.pivotaltracker.com/projects/1042066)
