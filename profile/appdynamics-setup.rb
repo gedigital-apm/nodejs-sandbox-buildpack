@@ -21,11 +21,12 @@ if credentials
   f.puts "export APPDYNAMICS_AGENT_ACCOUNT_NAME=#{credentials['account-name']}" if credentials['account-name']
   f.puts "export APPDYNAMICS_CONTROLLER_SSL_ENABLED=#{credentials['ssl-enabled']}" if credentials['ssl-enabled']
   f.puts "export APPDYNAMICS_AGENT_ACCOUNT_ACCESS_KEY=#{credentials['account-access-key']}" if credentials['account-access-key']
+  f.puts "export APPDYNAMICS_AGENT_APPLICATION_NAME=#{credentials['application-name']}" if credentials['application-name']
+
 
   vcap = JSON.load(ENV['VCAP_APPLICATION']) rescue {}
   if vcap['application_name']
-    f.puts "export APPDYNAMICS_AGENT_APPLICATION_NAME=#{vcap['application_name']}"
     f.puts "export APPDYNAMICS_AGENT_TIER_NAME=#{vcap['application_name']}"
-    f.puts "export APPDYNAMICS_AGENT_NODE_NAME=#{vcap['application_name']}:\\$CF_INSTANCE_INDEX"
+    f.puts "export APPDYNAMICS_AGENT_NODE_NAME=#{vcap['application_name']}:\$CF_INSTANCE_INDEX"
   end
 end
