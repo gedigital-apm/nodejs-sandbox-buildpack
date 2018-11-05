@@ -52,10 +52,6 @@ func (s *Stager) Logger() *Logger {
 	return s.log
 }
 
-func (s *Stager) DepsDir() string {
-	return s.depsDir
-}
-
 func (s *Stager) DepDir() string {
 	return filepath.Join(s.depsDir, s.depsIdx)
 }
@@ -68,11 +64,7 @@ func (s *Stager) WriteConfigYml(config interface{}) error {
 	if config == nil {
 		config = map[interface{}]interface{}{}
 	}
-	bpVersion, err := s.manifest.Version()
-	if err != nil {
-		return err
-	}
-	data := map[string]interface{}{"name": s.manifest.Language(), "config": config, "version": bpVersion}
+	data := map[string]interface{}{"name": s.manifest.Language(), "config": config}
 	y := &YAML{}
 	return y.Write(filepath.Join(s.DepDir(), "config.yml"), data)
 }
@@ -86,6 +78,21 @@ func (s *Stager) WriteEnvFile(envVar, envVal string) error {
 	}
 
 	return ioutil.WriteFile(filepath.Join(envDir, envVar), []byte(envVal), 0644)
+}
+
+func (s *Stager) AddBinDependencyLink(destPath, sourceName string) error {
+	binDir := filepath.Join(s.DepDir(), "bin")
+
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		return err
+	}
+
+	relPath, err := filepath.Rel(binDir, destPath)
+	if err != nil {
+		return err
+	}
+
+	return os.Symlink(relPath, filepath.Join(binDir, sourceName))
 }
 
 func (s *Stager) LinkDirectoryInDepDir(destDir, depSubDir string) error {
@@ -201,6 +208,22 @@ func (s *Stager) DepsIdx() string {
 	return s.depsIdx
 }
 
+var stagingEnvVarDirs = map[string]string{
+	"PATH":            "bin",
+	"LD_LIBRARY_PATH": "lib",
+	"LIBRARY_PATH":    "lib",
+	"INCLUDE_PATH":    "include",
+	"CPATH":           "include",
+	"CPPPATH":         "include",
+	"PKG_CONFIG_PATH": "pkgconfig",
+}
+
+var launchEnvVarDirs = map[string]string{
+	"PATH":            "bin",
+	"LD_LIBRARY_PATH": "lib",
+	"LIBRARY_PATH":    "lib",
+}
+
 func (s *Stager) SetStagingEnvironment() error {
 	for envVar, dir := range stagingEnvVarDirs {
 		oldVal := os.Getenv(envVar)
@@ -214,7 +237,7 @@ func (s *Stager) SetStagingEnvironment() error {
 			if len(oldVal) > 0 {
 				depsPaths = append(depsPaths, oldVal)
 			}
-			os.Setenv(envVar, strings.Join(depsPaths, envPathSeparator))
+			os.Setenv(envVar, strings.Join(depsPaths, ":"))
 		}
 	}
 
@@ -250,13 +273,13 @@ func (s *Stager) SetLaunchEnvironment() error {
 	scriptContents := ""
 
 	for envVar, dir := range launchEnvVarDirs {
-		depsPaths, err := existingDepsDirs(s.depsDir, dir, depsDirEnvVar)
+		depsPaths, err := existingDepsDirs(s.depsDir, dir, "$DEPS_DIR")
 		if err != nil {
 			return err
 		}
 
 		if len(depsPaths) != 0 {
-			scriptContents += fmt.Sprintf(scriptLineTemplate, envVar, strings.Join(depsPaths, envPathSeparator))
+			scriptContents += fmt.Sprintf(`export %[1]s=%[2]s$([[ ! -z "${%[1]s:-}" ]] && echo ":$%[1]s")`, envVar, strings.Join(depsPaths, ":"))
 			scriptContents += "\n"
 		}
 	}
@@ -265,7 +288,7 @@ func (s *Stager) SetLaunchEnvironment() error {
 		return err
 	}
 
-	scriptLocation := filepath.Join(s.ProfileDir(), scriptName)
+	scriptLocation := filepath.Join(s.ProfileDir(), "000_multi-supply.sh")
 	if err := writeToFile(strings.NewReader(scriptContents), scriptLocation, 0755); err != nil {
 		return err
 	}

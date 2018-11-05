@@ -26,19 +26,17 @@ func defaultCleanup(app *cutlass.App) {
 
 func UnbuiltBuildpack(depName string, copyBrats func(string) *cutlass.App) {
 	Context("Unbuilt buildpack (eg github)", func() {
-		var (
-			bpName string
-			app    *cutlass.App
-		)
+		var bpName string
+		var app *cutlass.App
 		BeforeEach(func() {
 			bpName = GenBpName("unbuilt")
-			app = copyBrats("")
-			app.Buildpacks = []string{bpName + "_buildpack"}
 			cmd := exec.Command("git", "archive", "-o", filepath.Join("/tmp", bpName+".zip"), "HEAD")
 			cmd.Dir = Data.BpDir
 			Expect(cmd.Run()).To(Succeed())
-			Expect(cutlass.CreateOrUpdateBuildpack(bpName, filepath.Join("/tmp", bpName+".zip"), "")).To(Succeed())
+			Expect(cutlass.CreateOrUpdateBuildpack(bpName, filepath.Join("/tmp", bpName+".zip"))).To(Succeed())
 			Expect(os.Remove(filepath.Join("/tmp", bpName+".zip"))).To(Succeed())
+			app = copyBrats("")
+			app.Buildpacks = []string{bpName + "_buildpack"}
 		})
 		AfterEach(func() {
 			defaultCleanup(app)
@@ -49,9 +47,7 @@ func UnbuiltBuildpack(depName string, copyBrats func(string) *cutlass.App) {
 			PushApp(app)
 			Expect(app.Stdout.String()).To(ContainSubstring("-----> Download go "))
 
-			if depName != "" {
-				Expect(app.Stdout.String()).To(ContainSubstring("Installing " + depName))
-			}
+			Expect(app.Stdout.String()).To(ContainSubstring("Installing " + depName))
 			Expect(app.GetBody("/")).To(ContainSubstring("Hello World!"))
 		})
 	})
@@ -59,39 +55,20 @@ func UnbuiltBuildpack(depName string, copyBrats func(string) *cutlass.App) {
 
 func DeployingAnAppWithAnUpdatedVersionOfTheSameBuildpack(copyBrats func(string) *cutlass.App) {
 	Describe("deploying an app with an updated version of the same buildpack", func() {
-		var (
-			bpName, stack string
-			app           *cutlass.App
-		)
+		var bpName string
+		var app *cutlass.App
 		BeforeEach(func() {
 			bpName = GenBpName("changing")
 			app = copyBrats("")
 			app.Buildpacks = []string{bpName + "_buildpack"}
-			stackAssociationSupported, err := cutlass.ApiGreaterThan("2.113.0")
-			Expect(err).ToNot(HaveOccurred())
-			if stackAssociationSupported {
-				stack = app.Stack
-			} else {
-				stack = ""
-			}
 		})
 		AfterEach(func() {
 			defaultCleanup(app)
 			Expect(cutlass.DeleteBuildpack(bpName)).To(Succeed())
-			// With stacks, creating the buildpack twice will result in a second record, one with `nil` stack.
-			// We need to clean up both.
-			if count, err := cutlass.CountBuildpack(bpName); err == nil && count > 0 {
-				Expect(cutlass.DeleteBuildpack(bpName)).To(Succeed(), "Attempted to delete buildpack %s", bpName)
-			}
-			// LTS errors when running `cf buildpacks`. Ignore that output.
-			count, err := cutlass.CountBuildpack(bpName)
-			if err == nil {
-				Expect(count).To(BeZero(), "There are %d %s buildpacks", count, bpName)
-			}
 		})
 
 		It("prints useful warning message to stdout", func() {
-			Expect(cutlass.CreateOrUpdateBuildpack(bpName, Data.UncachedFile, stack)).To(Succeed())
+			Expect(cutlass.CreateOrUpdateBuildpack(bpName, Data.UncachedFile)).To(Succeed())
 			PushApp(app)
 			Expect(app.Stdout.String()).ToNot(ContainSubstring("buildpack version changed from"))
 
@@ -103,7 +80,7 @@ func DeployingAnAppWithAnUpdatedVersionOfTheSameBuildpack(copyBrats func(string)
 			})
 			Expect(err).ToNot(HaveOccurred())
 
-			Expect(cutlass.CreateOrUpdateBuildpack(bpName, newFile, stack)).To(Succeed(), "Could not create or update %s on %s", bpName, stack)
+			Expect(cutlass.CreateOrUpdateBuildpack(bpName, newFile)).To(Succeed())
 			PushApp(app)
 			Expect(app.Stdout.String()).To(MatchRegexp(`buildpack version changed from (\S+) to NewVersion`))
 		})
@@ -113,8 +90,10 @@ func DeployingAnAppWithAnUpdatedVersionOfTheSameBuildpack(copyBrats func(string)
 func StagingWithBuildpackThatSetsEOL(depName string, copyBrats func(string) *cutlass.App) {
 	Describe("staging with "+depName+" buildpack that sets EOL on dependency", func() {
 		var (
-			eolDate, buildpackFile, bpName, stack string
-			app                                   *cutlass.App
+			eolDate       string
+			buildpackFile string
+			bpName        string
+			app           *cutlass.App
 		)
 		JustBeforeEach(func() {
 			eolDate = time.Now().AddDate(0, 0, 10).Format("2006-01-02")
@@ -127,19 +106,11 @@ func StagingWithBuildpackThatSetsEOL(depName string, copyBrats func(string) *cut
 			})
 			Expect(err).ToNot(HaveOccurred())
 			bpName = GenBpName("eol")
-			app = copyBrats("")
-			app.Buildpacks = []string{bpName + "_buildpack"}
-			stackAssociationSupported, err := cutlass.ApiGreaterThan("2.113.0")
-			Expect(err).ToNot(HaveOccurred())
-			if stackAssociationSupported {
-				stack = app.Stack
-			} else {
-				stack = ""
-			}
-
-			Expect(cutlass.CreateOrUpdateBuildpack(bpName, file, stack)).To(Succeed())
+			Expect(cutlass.CreateOrUpdateBuildpack(bpName, file)).To(Succeed())
 			os.Remove(file)
 
+			app = copyBrats("")
+			app.Buildpacks = []string{bpName + "_buildpack"}
 			PushApp(app)
 		})
 		AfterEach(func() {
@@ -172,9 +143,9 @@ func StagingWithADepThatIsNotTheLatestConstrained(depName string, versionConstra
 		var app *cutlass.App
 		BeforeEach(func() {
 			manifest, err := libbuildpack.NewManifest(Data.BpDir, nil, time.Now())
-			Expect(err).ToNot(HaveOccurred(), "Making new manifest from %s: error is %v", Data.BpDir, err)
+			Expect(err).ToNot(HaveOccurred())
 			versions, err := libbuildpack.FindMatchingVersions(versionConstraint, manifest.AllDependencyVersions(depName))
-			Expect(err).ToNot(HaveOccurred(), "Finding matching version: error is %v", err)
+			Expect(err).ToNot(HaveOccurred())
 			app = copyBrats(versions[0])
 			app.Buildpacks = []string{Data.Cached}
 			PushApp(app)
@@ -193,56 +164,29 @@ func StagingWithADepThatIsNotTheLatest(depName string, copyBrats func(string) *c
 	StagingWithADepThatIsNotTheLatestConstrained(depName, "x", copyBrats)
 }
 
-func StagingWithCustomBuildpackWithCredentialsInDependencies(copyBrats func(string) *cutlass.App) {
+func StagingWithCustomBuildpackWithCredentialsInDependencies(depRegexp string, copyBrats func(string) *cutlass.App) {
 	Describe("staging with custom buildpack that uses credentials in manifest dependency uris", func() {
 		var (
-			buildpackFile, bpName, stack, username, password string
-			app                                              *cutlass.App
+			buildpackFile string
+			bpName        string
+			app           *cutlass.App
 		)
 		JustBeforeEach(func() {
 			file, err := ModifyBuildpackManifest(buildpackFile, func(m *Manifest) {
 				for _, d := range m.Dependencies {
 					uri, err := url.Parse(d.URI)
-					if proxyHost, ok := os.LookupEnv("PROXY_HOST"); ok {
-						uri.Host = proxyHost
-					}
-					if proxyPort, ok := os.LookupEnv("PROXY_PORT"); ok {
-						uri.Host += ":" + proxyPort
-					}
-					if proxyScheme, ok := os.LookupEnv("PROXY_SCHEME"); ok {
-						uri.Scheme = proxyScheme
-					}
-					if proxyUsername, ok := os.LookupEnv("PROXY_USERNAME"); ok {
-						username = proxyUsername
-					} else {
-						username = "login"
-					}
-					if proxyPassword, ok := os.LookupEnv("PROXY_PASSWORD"); ok {
-						password = proxyPassword
-					} else {
-						password = "password"
-					}
-					uri.User = url.UserPassword(username, password)
+					uri.User = url.UserPassword("login", "password")
 					Expect(err).ToNot(HaveOccurred())
 					d.URI = uri.String()
 				}
 			})
 			Expect(err).ToNot(HaveOccurred())
 			bpName = GenBpName("eol")
+			Expect(cutlass.CreateOrUpdateBuildpack(bpName, file)).To(Succeed())
+			os.Remove(file)
 
 			app = copyBrats("")
 			app.Buildpacks = []string{bpName + "_buildpack"}
-
-			stackAssociationSupported, err := cutlass.ApiGreaterThan("2.113.0")
-			Expect(err).ToNot(HaveOccurred())
-			if stackAssociationSupported {
-				stack = app.Stack
-			} else {
-				stack = ""
-			}
-
-			Expect(cutlass.CreateOrUpdateBuildpack(bpName, file, stack)).To(Succeed())
-			os.Remove(file)
 			PushApp(app)
 		})
 		AfterEach(func() {
@@ -254,9 +198,19 @@ func StagingWithCustomBuildpackWithCredentialsInDependencies(copyBrats func(stri
 				buildpackFile = Data.UncachedFile
 			})
 			It("does not include credentials in logged dependency uris", func() {
-				Expect(app.Stdout.String()).To(MatchRegexp(`\[.*-redacted-:-redacted-.*\]`))
-				Expect(app.Stdout.String()).ToNot(ContainSubstring(username))
-				Expect(app.Stdout.String()).ToNot(ContainSubstring(password))
+				Expect(app.Stdout.String()).To(MatchRegexp(depRegexp))
+				Expect(app.Stdout.String()).ToNot(ContainSubstring("login"))
+				Expect(app.Stdout.String()).ToNot(ContainSubstring("password"))
+			})
+		})
+		Context("using a cached buildpack", func() {
+			BeforeEach(func() {
+				buildpackFile = Data.UncachedFile
+			})
+			It("does not include credentials in logged dependency file paths", func() {
+				Expect(app.Stdout.String()).To(MatchRegexp(depRegexp))
+				Expect(app.Stdout.String()).ToNot(ContainSubstring("login"))
+				Expect(app.Stdout.String()).ToNot(ContainSubstring("password"))
 			})
 		})
 	})
@@ -266,16 +220,11 @@ func DeployAppWithExecutableProfileScript(depName string, copyBrats func(string)
 	Describe("deploying an app that has an executable .profile script", func() {
 		var app *cutlass.App
 		BeforeEach(func() {
-			if depName != "" {
-				manifest, err := libbuildpack.NewManifest(Data.BpDir, nil, time.Now())
-				Expect(err).ToNot(HaveOccurred())
-				dep, err := manifest.DefaultVersion(depName)
-				Expect(err).ToNot(HaveOccurred())
+			manifest, err := libbuildpack.NewManifest(Data.BpDir, nil, time.Now())
+			dep, err := manifest.DefaultVersion(depName)
+			Expect(err).ToNot(HaveOccurred())
 
-				app = copyBrats(dep.Version)
-			} else {
-				app = copyBrats("")
-			}
+			app = copyBrats(dep.Version)
 			AddDotProfileScriptToApp(app.Path)
 			app.Buildpacks = []string{Data.Cached}
 			PushApp(app)

@@ -3,6 +3,7 @@ package main
 import (
 	"io"
 	"io/ioutil"
+	"nodejs/cache"
 	_ "nodejs/hooks"
 	"nodejs/npm"
 	"nodejs/supply"
@@ -14,7 +15,7 @@ import (
 )
 
 func main() {
-	logfile, err := ioutil.TempFile("", "cloudfoundry.nodejs-buildpack.supply")
+	logfile, err := ioutil.TempFile("", "cloudfoundry.nodejs-buildpack.finalize")
 	defer logfile.Close()
 	if err != nil {
 		logger := libbuildpack.NewLogger(os.Stdout)
@@ -36,20 +37,10 @@ func main() {
 		logger.Error("Unable to load buildpack manifest: %s", err.Error())
 		os.Exit(10)
 	}
-	installer := libbuildpack.NewInstaller(manifest)
 
 	stager := libbuildpack.NewStager(os.Args[1:], logger, manifest)
 	if err := stager.CheckBuildpackValid(); err != nil {
 		os.Exit(11)
-	}
-
-	if err = installer.SetAppCacheDir(stager.CacheDir()); err != nil {
-		logger.Error("Unable to setup appcache: %s", err)
-		os.Exit(18)
-	}
-	if err = manifest.ApplyOverride(stager.DepsDir()); err != nil {
-		logger.Error("Unable to apply override.yml files: %s", err)
-		os.Exit(17)
 	}
 
 	err = libbuildpack.RunBeforeCompile(stager)
@@ -68,17 +59,23 @@ func main() {
 		Logfile: logfile,
 		Stager:  stager,
 		Yarn: &yarn.Yarn{
-			Command: &libbuildpack.Command{},
-			Log:     logger,
+			BuildDir: stager.BuildDir(),
+			Command:  &libbuildpack.Command{},
+			Log:      logger,
 		},
 		NPM: &npm.NPM{
+			BuildDir: stager.BuildDir(),
+			Command:  &libbuildpack.Command{},
+			Log:      logger,
+		},
+		Manifest: manifest,
+		Log:      logger,
+		Command:  &libbuildpack.Command{},
+		Cache: &cache.Cache{
+			Stager:  stager,
 			Command: &libbuildpack.Command{},
 			Log:     logger,
 		},
-		Manifest:  manifest,
-		Installer: installer,
-		Log:       logger,
-		Command:   &libbuildpack.Command{},
 	}
 
 	err = supply.Run(&s)
@@ -89,9 +86,5 @@ func main() {
 	if err := stager.WriteConfigYml(nil); err != nil {
 		logger.Error("Error writing config.yml: %s", err.Error())
 		os.Exit(15)
-	}
-	if err = installer.CleanupAppCache(); err != nil {
-		logger.Error("Unable to clean up app cache: %s", err)
-		os.Exit(19)
 	}
 }

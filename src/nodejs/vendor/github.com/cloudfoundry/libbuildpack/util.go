@@ -33,15 +33,7 @@ func CopyDirectory(srcDir, destDir string) error {
 		src := filepath.Join(srcDir, f.Name())
 		dest := filepath.Join(destDir, f.Name())
 
-		if m := f.Mode(); m&os.ModeSymlink != 0 {
-			target, err := os.Readlink(src)
-			if err != nil {
-				return fmt.Errorf("Error while reading symlink '%s': %v", src, err)
-			}
-			if err := os.Symlink(target, dest); err != nil {
-				return fmt.Errorf("Error while creating '%s' as symlink to '%s': %v", dest, target, err)
-			}
-		} else if f.IsDir() {
+		if f.IsDir() {
 			err = os.MkdirAll(dest, f.Mode())
 			if err != nil {
 				return err

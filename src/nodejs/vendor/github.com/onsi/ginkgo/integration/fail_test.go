@@ -11,7 +11,7 @@ var _ = Describe("Failing Specs", func() {
 
 	BeforeEach(func() {
 		pathToTest = tmpPath("failing")
-		copyIn(fixturePath("fail_fixture"), pathToTest, false)
+		copyIn("fail_fixture", pathToTest)
 	})
 
 	It("should fail in all the possible ways", func() {

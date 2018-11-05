@@ -17,13 +17,6 @@ type Command interface {
 	Execute(string, io.Writer, io.Writer, string, ...string) error
 }
 
-type DynatraceCredentials struct {
-	ServiceName string
-	EnvironmentId string
-	ApiToken string
-	ApiURL string
-	SkipErrors bool
-}
 type DynatraceHook struct {
 	libbuildpack.DefaultHook
 	Log     *libbuildpack.Logger
@@ -43,26 +36,28 @@ func init() {
 func (h DynatraceHook) AfterCompile(stager *libbuildpack.Stager) error {
 	h.Log.Debug("Checking for enabled dynatrace service...")
 
-	credentials, found := h.dtCredentials()
-	if !found {
+	credentials := h.dtCredentials()
+	if credentials == nil {
 		h.Log.Debug("Dynatrace service credentials not found!")
 		return nil
 	}
 
 	h.Log.Info("Dynatrace service credentials found. Setting up Dynatrace PaaS agent.")
 
-	apiurl := credentials.ApiURL
-	if apiurl == "" {
-		apiurl = "https://" + credentials.EnvironmentId + ".live.dynatrace.com/api"
+	skipErrors := credentials["skiperrors"]
+
+	apiurl, present := credentials["apiurl"]
+	if !present {
+		apiurl = "https://" + credentials["environmentid"] + ".live.dynatrace.com/api"
 	}
 
-	url := apiurl + "/v1/deployment/installer/agent/unix/paas-sh/latest?include=nodejs&include=process&bitness=64&Api-Token=" + credentials.ApiToken
+	url := apiurl + "/v1/deployment/installer/agent/unix/paas-sh/latest?include=nodejs&include=process&bitness=64&Api-Token=" + credentials["apitoken"]
 	installerPath := filepath.Join(os.TempDir(), "paasInstaller.sh")
 
 	h.Log.Debug("Downloading '%s' to '%s'", url, installerPath)
 	err := h.downloadFile(url, installerPath)
 	if err != nil {
-		if credentials.SkipErrors {
+		if skipErrors == "true" {
 			h.Log.Warning("Error during installer download, skipping installation")
 			return nil
 		}
@@ -134,57 +129,38 @@ func (h DynatraceHook) AfterCompile(stager *libbuildpack.Stager) error {
 	return nil
 }
 
-func (h DynatraceHook) getCredentialString(credentials map[string]interface{},key string) string {
-	value, isString := credentials[key].(string)
-
-	if isString {
-		return value
-	}
-	return ""
-}
-
-func (h DynatraceHook) dtCredentials() (DynatraceCredentials, bool) {
+func (h DynatraceHook) dtCredentials() map[string]string {
 	type Service struct {
-		Name        string                 `json:"name"`
-		Credentials map[string]interface{} `json:"credentials"`
+		Name        string            `json:"name"`
+		Credentials map[string]string `json:"credentials"`
 	}
-
 	var vcapServices map[string][]Service
 
 	err := json.Unmarshal([]byte(os.Getenv("VCAP_SERVICES")), &vcapServices)
 	if err != nil {
-		h.Log.Debug("Failed to unmarshal VCAP_SERVICES: %s", err)
-		return DynatraceCredentials{}, false
+		return nil
 	}
 
-	var detectedCredentials []DynatraceCredentials
+	var detectedServices []Service
 
 	for _, services := range vcapServices {
 		for _, service := range services {
-			if strings.Contains(service.Name, "dynatrace") {
-				credentials := DynatraceCredentials{
-					ServiceName :   service.Name,
-					EnvironmentId : h.getCredentialString(service.Credentials, "environmentid"),
-					ApiToken :      h.getCredentialString(service.Credentials, "apitoken"),
-					ApiURL :        h.getCredentialString(service.Credentials, "apiurl"),
-					SkipErrors :    h.getCredentialString(service.Credentials, "skiperrors") == "true",
-				}
-
-				if credentials.EnvironmentId != "" && credentials.ApiToken != "" {
-					detectedCredentials = append(detectedCredentials, credentials)
-				}
+			if strings.Contains(service.Name, "dynatrace") &&
+					service.Credentials["environmentid"] != "" &&
+					service.Credentials["apitoken"] != "" {
+				detectedServices = append(detectedServices, service)
 			}
 		}
 	}
 
-	if len(detectedCredentials) == 1 {
-		h.Log.Debug("Found one matching service: %s", detectedCredentials[0].ServiceName)
-		return detectedCredentials[0], true
-	} else if len(detectedCredentials) > 1 {
+	if len(detectedServices) == 1 {
+		h.Log.Debug("Found one matching service: %s", detectedServices[0].Name)
+		return detectedServices[0].Credentials
+	} else if len(detectedServices) > 1 {
 		h.Log.Warning("More than one matching service found!")
 	}
 
-	return DynatraceCredentials{}, false
+	return nil
 }
 
 func (h DynatraceHook) appName() string {
