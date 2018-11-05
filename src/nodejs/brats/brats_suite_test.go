@@ -25,7 +25,7 @@ func init() {
 
 var _ = SynchronizedBeforeSuite(func() []byte {
 	// Run once
-	return bratshelper.InitBpData(os.Getenv("CF_STACK"), ApiHasStackAssociation()).Marshal()
+	return bratshelper.InitBpData(os.Getenv("CF_STACK")).Marshal()
 }, func(data []byte) {
 	// Run on all nodes
 	bratshelper.Data.Unmarshal(data)
@@ -55,25 +55,13 @@ func CopyBrats(nodejsVersion string) *cutlass.App {
 	Expect(err).ToNot(HaveOccurred())
 
 	if nodejsVersion != "" {
-		versionMajor := strings.Split(nodejsVersion, ".")[0]
-		bcryptVersion := "*"
-		if versionMajor == "8" {
-			bcryptVersion = "~1.0.3"
-		}
-
 		file, err := ioutil.ReadFile(filepath.Join(dir, "package.json"))
 		Expect(err).ToNot(HaveOccurred())
 		obj := make(map[string]interface{})
 		Expect(json.Unmarshal(file, &obj)).To(Succeed())
-
 		engines, ok := obj["engines"].(map[string]interface{})
 		Expect(ok).To(BeTrue())
 		engines["node"] = nodejsVersion
-
-		deps, ok := obj["dependencies"].(map[string]interface{})
-		Expect(ok).To(BeTrue())
-		deps["bcrypt"] = bcryptVersion
-
 		file, err = json.Marshal(obj)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(ioutil.WriteFile(filepath.Join(dir, "package.json"), file, 0644)).To(Succeed())
@@ -85,10 +73,4 @@ func CopyBrats(nodejsVersion string) *cutlass.App {
 func PushApp(app *cutlass.App) {
 	Expect(app.Push()).To(Succeed())
 	Eventually(app.InstanceStates, 20*time.Second).Should(Equal([]string{"RUNNING"}))
-}
-
-func ApiHasStackAssociation() bool {
-	supported, err := cutlass.ApiGreaterThan("2.113.0")
-	Expect(err).NotTo(HaveOccurred())
-	return supported
 }

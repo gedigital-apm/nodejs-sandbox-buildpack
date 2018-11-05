@@ -26,9 +26,8 @@ var _ = Describe("pushing an app a second time", func() {
 		app = cutlass.New(filepath.Join(bpDir, "fixtures", "simple_app"))
 	})
 
-	Regexp := `\[.*/node\-[\d\.]+\-linux\-x64\-(cflinuxfs.*-)?[\da-f]+\.tgz\]`
-	DownloadRegexp := "Download " + Regexp
-	CopyRegexp := "Copy " + Regexp
+	DownloadRegexp := `Download \[.*/node\-[\d\.]+\-linux-x64-[0-9a-f]+\.tgz\]`
+	CopyRegexp := `Copy \[.*/node\-[\d\.]+\-linux-x64-[0-9a-f]+\.tgz\]`
 
 	It("uses the cache for manifest dependencies", func() {
 		PushAppAndConfirm(app)

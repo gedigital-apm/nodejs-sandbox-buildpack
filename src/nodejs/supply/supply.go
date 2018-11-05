@@ -3,10 +3,10 @@ package supply
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
-	"nodejs/package_json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,10 +64,20 @@ type Supplier struct {
 	HasDevDependencies bool
 	PostBuild          string
 	UseYarn            bool
-	UsesYarnWorkspaces bool
 	IsVendored         bool
 	Yarn               Yarn
 	NPM                NPM
+}
+
+type packageJSON struct {
+	Engines engines `json:"engines"`
+}
+
+type engines struct {
+	Node string `json:"node"`
+	Yarn string `json:"yarn"`
+	NPM  string `json:"npm"`
+	Iojs string `json:"iojs"`
 }
 
 func Run(s *Supplier) error {
@@ -133,11 +143,9 @@ func Run(s *Supplier) error {
 			return err
 		}
 
-		if !s.UseYarn || !s.UsesYarnWorkspaces {
-			if err := s.MoveDependencyArtifacts(); err != nil {
-				s.Log.Error("Unable to move dependencies: %s", err.Error())
-				return err
-			}
+		if err := s.MoveDependencyArtifacts(); err != nil {
+			s.Log.Error("Unable to move dependencies: %s", err.Error())
+			return err
 		}
 
 		s.ListDependencies()
@@ -287,7 +295,6 @@ func (s *Supplier) ReadPackageJSON() error {
 			StartScript string `json:"start"`
 		} `json:"scripts"`
 		DevDependencies map[string]string `json:"devDependencies"`
-		Workspaces      []string          `json:"workspaces"`
 	}
 
 	if s.UseYarn, err = libbuildpack.FileExists(filepath.Join(s.Stager.BuildDir(), "yarn.lock")); err != nil {
@@ -307,7 +314,6 @@ func (s *Supplier) ReadPackageJSON() error {
 		}
 	}
 
-	s.UsesYarnWorkspaces = (len(p.Workspaces) > 0)
 	s.HasDevDependencies = (len(p.DevDependencies) > 0)
 	s.PreBuild = p.Scripts.PreBuild
 	s.PostBuild = p.Scripts.PostBuild
@@ -426,9 +432,27 @@ func fileHasString(file string, patterns ...string) (bool, error) {
 }
 
 func (s *Supplier) LoadPackageJSON() error {
-	p, err := package_json.LoadPackageJSON(filepath.Join(s.Stager.BuildDir(), "package.json"), s.Log)
-	if err != nil {
+	var p packageJSON
+
+	err := libbuildpack.NewJSON().Load(filepath.Join(s.Stager.BuildDir(), "package.json"), &p)
+	if err != nil && !os.IsNotExist(err) {
 		return err
+	}
+
+	if p.Engines.Iojs != "" {
+		return errors.New("io.js not supported by this buildpack")
+	}
+
+	if p.Engines.Node != "" {
+		s.Log.Info("engines.node (package.json): %s", p.Engines.Node)
+	} else {
+		s.Log.Info("engines.node (package.json): unspecified")
+	}
+
+	if p.Engines.NPM != "" {
+		s.Log.Info("engines.npm (package.json): %s", p.Engines.NPM)
+	} else {
+		s.Log.Info("engines.npm (package.json): unspecified (use default)")
 	}
 
 	s.NodeVersion = p.Engines.Node

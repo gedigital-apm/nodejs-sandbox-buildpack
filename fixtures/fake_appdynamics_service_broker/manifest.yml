@@ -1,4 +1,5 @@
 ---
 applications:
-- buildpack: ruby_buildpack
+- name: fake_newrelic_service_broker
+  buildpack: ruby_buildpack
 

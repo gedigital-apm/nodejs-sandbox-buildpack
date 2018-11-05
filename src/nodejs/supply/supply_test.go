@@ -286,9 +286,11 @@ var _ = Describe("Supply", func() {
 	})
 
 	Describe("InstallNode", func() {
+		var nodeInstallDir string
 		var nodeTmpDir string
 
 		BeforeEach(func() {
+			nodeInstallDir = filepath.Join(depsDir, depsIdx, "node")
 			nodeTmpDir, err = ioutil.TempDir("", "nodejs-buildpack.temp")
 			Expect(err).To(BeNil())
 		})
