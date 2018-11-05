@@ -1,13 +1,16 @@
 package libbuildpack
 
 import (
+	"crypto/md5"
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/Masterminds/semver"
 )
 
 const dateFormat = "2006-01-02"
@@ -28,7 +31,6 @@ type DeprecationDate struct {
 type ManifestEntry struct {
 	Dependency Dependency `yaml:",inline"`
 	URI        string     `yaml:"uri"`
-	File       string     `yaml:"file"`
 	SHA256     string     `yaml:"sha256"`
 	CFStacks   []string   `yaml:"cf_stacks"`
 }
@@ -38,9 +40,8 @@ type Manifest struct {
 	DefaultVersions []Dependency      `yaml:"default_versions"`
 	ManifestEntries []ManifestEntry   `yaml:"dependencies"`
 	Deprecations    []DeprecationDate `yaml:"dependency_deprecation_dates"`
-	Stack           string            `yaml:"stack"`
 	manifestRootDir string
-	currentTime     time.Time //move into installer?
+	currentTime     time.Time
 	log             *Logger
 }
 
@@ -68,7 +69,6 @@ func NewManifest(bpDir string, logger *Logger, currentTime time.Time) (*Manifest
 
 	return &m, nil
 }
-
 func (m *Manifest) replaceDefaultVersion(oDep Dependency) {
 	replaced := false
 	for idx, mDep := range m.DefaultVersions {
@@ -181,29 +181,17 @@ func (m *Manifest) Version() (string, error) {
 func (m *Manifest) CheckStackSupport() error {
 	requiredStack := os.Getenv("CF_STACK")
 
-	if m.manifestSupportsStack(requiredStack) {
+	if len(m.ManifestEntries) == 0 {
 		return nil
 	}
-
-	return fmt.Errorf("required stack %s was not found", requiredStack)
-}
-
-func (m *Manifest) manifestSupportsStack(stack string) bool {
-	if m.Stack != "" {
-		return m.Stack == stack
-	}
-
-	if len(m.ManifestEntries) == 0 {
-		return true
-	}
-
 	for _, entry := range m.ManifestEntries {
-		if m.entrySupportsStack(&entry, stack) {
-			return true
+		for _, stack := range entry.CFStacks {
+			if stack == requiredStack {
+				return nil
+			}
 		}
 	}
-
-	return false
+	return fmt.Errorf("required stack %s was not found", requiredStack)
 }
 
 func (m *Manifest) DefaultVersion(depName string) (Dependency, error) {
@@ -240,44 +228,157 @@ func (m *Manifest) DefaultVersion(depName string) (Dependency, error) {
 	return Dependency{Name: depName, Version: highestVersion}, nil
 }
 
-func fetchCachedBuildpackDependency(entry *ManifestEntry, outputFile, manifestRootDir string, manifestLog *Logger) error {
-	source := entry.File
-	if !filepath.IsAbs(source) {
-		source = filepath.Join(manifestRootDir, source)
-	}
-	manifestLog.Info("Copy [%s]", source)
-	if err := CopyFile(source, outputFile); err != nil {
+func (m *Manifest) InstallDependency(dep Dependency, outputDir string) error {
+	m.log.BeginStep("Installing %s %s", dep.Name, dep.Version)
+
+	tmpDir, err := ioutil.TempDir("", "downloads")
+	if err != nil {
 		return err
 	}
-	return deleteBadFile(entry, outputFile)
+	tmpFile := filepath.Join(tmpDir, "archive")
+
+	entry, err := m.getEntry(dep)
+	if err != nil {
+		return err
+	}
+
+	err = m.FetchDependency(dep, tmpFile)
+	if err != nil {
+		return err
+	}
+
+	err = m.warnNewerPatch(dep)
+	if err != nil {
+		return err
+	}
+
+	err = m.warnEndOfLife(dep)
+	if err != nil {
+		return err
+	}
+
+	if strings.HasSuffix(entry.URI, ".sh") {
+		return os.Rename(tmpFile, outputDir)
+	}
+
+	err = os.MkdirAll(outputDir, 0755)
+	if err != nil {
+		return err
+	}
+
+	if strings.HasSuffix(entry.URI, ".zip") {
+		return ExtractZip(tmpFile, outputDir)
+	}
+
+	if strings.HasSuffix(entry.URI, ".tar.xz") {
+		return ExtractTarXz(tmpFile, outputDir)
+	}
+
+	return ExtractTarGz(tmpFile, outputDir)
 }
 
-func deleteBadFile(entry *ManifestEntry, outputFile string) error {
-	if err := checkSha256(outputFile, entry.SHA256); err != nil {
-		os.Remove(outputFile)
+func (m *Manifest) warnNewerPatch(dep Dependency) error {
+	versions := m.AllDependencyVersions(dep.Name)
+
+	v, err := semver.NewVersion(dep.Version)
+	if err != nil {
+		return nil
+	}
+
+	constraint := fmt.Sprintf("%d.%d.x", v.Major(), v.Minor())
+	latest, err := FindMatchingVersion(constraint, versions)
+	if err != nil {
 		return err
+	}
+
+	if latest != dep.Version {
+		m.log.Warning(outdatedDependencyWarning(dep, latest))
+	}
+
+	return nil
+}
+
+func (m *Manifest) warnEndOfLife(dep Dependency) error {
+	matchVersion := func(versionLine, depVersion string) bool {
+		return versionLine == depVersion
+	}
+
+	v, err := semver.NewVersion(dep.Version)
+	if err == nil {
+		matchVersion = func(versionLine, depVersion string) bool {
+			constraint, err := semver.NewConstraint(versionLine)
+			if err != nil {
+				return false
+			}
+
+			return constraint.Check(v)
+		}
+	}
+
+	for _, deprecation := range m.Deprecations {
+		if deprecation.Name != dep.Name {
+			continue
+		}
+		if !matchVersion(deprecation.VersionLine, dep.Version) {
+			continue
+		}
+
+		eolTime, err := time.Parse(dateFormat, deprecation.Date)
+		if err != nil {
+			return err
+		}
+
+		if eolTime.Sub(m.currentTime) < thirtyDays {
+			m.log.Warning(endOfLifeWarning(dep.Name, deprecation.VersionLine, deprecation.Date, deprecation.Link))
+		}
 	}
 	return nil
 }
 
-func downloadDependency(entry *ManifestEntry, outputFile string, logger *Logger) error {
+func (m *Manifest) FetchDependency(dep Dependency, outputFile string) error {
+	entry, err := m.getEntry(dep)
+	if err != nil {
+		return err
+	}
+
 	filteredURI, err := filterURI(entry.URI)
 	if err != nil {
 		return err
 	}
-	logger.Info("Download [%s]", filteredURI)
-	err = downloadFile(entry.URI, outputFile)
+
+	if m.IsCached() {
+		source := filepath.Join(m.manifestRootDir, "dependencies", fmt.Sprintf("%x", md5.Sum([]byte(entry.URI))), path.Base(entry.URI))
+		exists, err := FileExists(source)
+		if err != nil {
+			m.log.Warning("Error determining if cached file exists: %s", err.Error())
+		}
+		if !exists {
+			r := strings.NewReplacer("/", "_", ":", "_", "?", "_", "&", "_")
+			source = filepath.Join(m.manifestRootDir, "dependencies", r.Replace(filteredURI))
+		}
+		m.log.Info("Copy [%s]", source)
+		err = CopyFile(source, outputFile)
+	} else {
+		m.log.Info("Download [%s]", filteredURI)
+		err = downloadFile(entry.URI, outputFile)
+	}
 	if err != nil {
 		return err
 	}
 
-	return deleteBadFile(entry, outputFile)
+	err = checkSha256(outputFile, entry.SHA256)
+	if err != nil {
+		os.Remove(outputFile)
+		return err
+	}
+
+	return nil
 }
 
-func (m *Manifest) entrySupportsStack(entry *ManifestEntry, stack string) bool {
-
-	if m.Stack != "" {
-		return m.Stack == stack
+func (m *Manifest) entrySupportsCurrentStack(entry *ManifestEntry) bool {
+	stack := os.Getenv("CF_STACK")
+	if stack == "" {
+		return true
 	}
 
 	for _, s := range entry.CFStacks {
@@ -291,10 +392,9 @@ func (m *Manifest) entrySupportsStack(entry *ManifestEntry, stack string) bool {
 
 func (m *Manifest) AllDependencyVersions(depName string) []string {
 	var depVersions []string
-	currentStack := os.Getenv("CF_STACK")
 
 	for _, e := range m.ManifestEntries {
-		if e.Dependency.Name == depName && m.entrySupportsStack(&e, currentStack) {
+		if e.Dependency.Name == depName && m.entrySupportsCurrentStack(&e) {
 			depVersions = append(depVersions, e.Dependency.Version)
 		}
 	}
@@ -302,11 +402,22 @@ func (m *Manifest) AllDependencyVersions(depName string) []string {
 	return depVersions
 }
 
-func (m *Manifest) GetEntry(dep Dependency) (*ManifestEntry, error) {
-	currentStack := os.Getenv("CF_STACK")
+func (m *Manifest) InstallOnlyVersion(depName string, installDir string) error {
+	depVersions := m.AllDependencyVersions(depName)
 
+	if len(depVersions) > 1 {
+		return fmt.Errorf("more than one version of %s found", depName)
+	} else if len(depVersions) == 0 {
+		return fmt.Errorf("no versions of %s found", depName)
+	}
+
+	dep := Dependency{Name: depName, Version: depVersions[0]}
+	return m.InstallDependency(dep, installDir)
+}
+
+func (m *Manifest) getEntry(dep Dependency) (*ManifestEntry, error) {
 	for _, e := range m.ManifestEntries {
-		if e.Dependency == dep && m.entrySupportsStack(&e, currentStack) {
+		if e.Dependency == dep && m.entrySupportsCurrentStack(&e) {
 			return &e, nil
 		}
 	}

@@ -35,7 +35,6 @@ func ModifyBuildpackManifest(path string, cb func(*Manifest)) (string, error) {
 }
 
 type Manifest struct {
-	Stack           string `yaml:"stack"`
 	Language        string `yaml:"language"`
 	DefaultVersions []*struct {
 		Name    string `yaml:"name"`
@@ -47,7 +46,6 @@ type Manifest struct {
 		Name        string `yaml:"name"`
 		Date        string `yaml:"date"`
 		Link        string `yaml:"link"`
-		Match       string `yaml:"match,omitempty"` // CompileExtensions
 	} `yaml:"dependency_deprecation_dates"`
 	Dependencies []*struct {
 		Name     string   `yaml:"name"`
@@ -56,11 +54,8 @@ type Manifest struct {
 		Md5      string   `yaml:"md5,omitempty"`
 		Sha256   string   `yaml:"sha256,omitempty"`
 		CfStacks []string `yaml:"cf_stacks"`
-		Modules  []string `yaml:"modules,omitempty"` // CompileExtensions PHP
 	} `yaml:"dependencies"`
-	IncludeFiles       []string      `yaml:"include_files,omitempty"`
-	ExcludeFiles       []string      `yaml:"exclude_files,omitempty"`         // CompileExtensions
-	UrlToDependencyMap []interface{} `yaml:"url_to_dependency_map,omitempty"` // CompileExtensions
+	IncludeFiles []string `yaml:"include_files"`
 }
 
 func modifyZipfile(path string, cb func(path string, r io.Reader) (io.Reader, error)) (string, error) {

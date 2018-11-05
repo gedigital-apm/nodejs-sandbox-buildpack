@@ -30,7 +30,7 @@ func Summary(bpDir string) (string, error) {
 
 	var out string
 	if len(manifest.Dependencies) > 0 {
-		out = "\nPackaged binaries:\n\n"
+		out = "Packaged binaries:\n\n"
 		sort.Sort(manifest.Dependencies)
 		if hasModules {
 			out += "| name | version | cf_stacks | modules |\n|-|-|-|-|\n"

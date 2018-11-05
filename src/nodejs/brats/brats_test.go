@@ -11,8 +11,8 @@ var _ = Describe("Nodejs buildpack", func() {
 	bratshelper.UnbuiltBuildpack("node", CopyBrats)
 	bratshelper.DeployingAnAppWithAnUpdatedVersionOfTheSameBuildpack(CopyBrats)
 	bratshelper.StagingWithBuildpackThatSetsEOL("node", CopyBrats)
-	// bratshelper.StagingWithADepThatIsNotTheLatest("node", CopyBrats)
-	bratshelper.StagingWithCustomBuildpackWithCredentialsInDependencies(CopyBrats)
+	bratshelper.StagingWithADepThatIsNotTheLatest("node", CopyBrats)
+	bratshelper.StagingWithCustomBuildpackWithCredentialsInDependencies(`node\-[\d\.]+\-linux\-x64\-[\da-f]+\.tgz`, CopyBrats)
 	bratshelper.DeployAppWithExecutableProfileScript("node", CopyBrats)
 	bratshelper.DeployAnAppWithSensitiveEnvironmentVariables(CopyBrats)
 	bratshelper.ForAllSupportedVersions("node", CopyBrats, func(nodeVersion string, app *cutlass.App) {

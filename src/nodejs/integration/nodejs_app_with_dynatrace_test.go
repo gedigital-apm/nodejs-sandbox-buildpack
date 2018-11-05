@@ -1,29 +1,18 @@
 package integration_test
 
 import (
-		"os/exec"
+	"path/filepath"
+	"os/exec"
 
 	"github.com/cloudfoundry/libbuildpack/cutlass"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	"path/filepath"
 )
 
 var _ = Describe("CF NodeJS Buildpack", func() {
-	var (
-		app             *cutlass.App
-		createdServices []string
-	)
-
-	BeforeEach(func() {
-		app = cutlass.New(filepath.Join(bpDir, "fixtures", "logenv"))
-		app.SetEnv("BP_DEBUG", "true")
-		PushAppAndConfirm(app)
-
-		createdServices = make([]string, 0)
-	})
-
+	var app *cutlass.App
+	var createdServices []string
 	AfterEach(func() {
 		if app != nil {
 			app.Destroy()
@@ -37,8 +26,17 @@ var _ = Describe("CF NodeJS Buildpack", func() {
 		}
 	})
 
+	BeforeEach(func() {
+		app = cutlass.New(filepath.Join(bpDir, "fixtures", "logenv"))
+		app.SetEnv("BP_DEBUG", "true")
+		PushAppAndConfirm(app)
+
+		createdServices = make([]string, 0)
+	})
+
 	Context("deploying a NodeJS app with Dynatrace agent with single credentials service", func() {
 		It("checks if Dynatrace injection was successful", func() {
+
 			serviceName := "dynatrace-" + cutlass.RandStringRunes(20) + "-service"
 			command := exec.Command("cf", "cups", serviceName, "-p", "'{\"apitoken\":\"secretpaastoken\",\"apiurl\":\"https://s3.amazonaws.com/dt-paas/manifest\",\"environmentid\":\"envid\"}'")
 			_, err := command.CombinedOutput()
@@ -65,6 +63,7 @@ var _ = Describe("CF NodeJS Buildpack", func() {
 
 	Context("deploying a NodeJS app with Dynatrace agent with two credentials services", func() {
 		It("checks if detection of second service with credentials works", func() {
+
 			CredentialsServiceName := "dynatrace-" + cutlass.RandStringRunes(20) + "-service"
 			command := exec.Command("cf", "cups", CredentialsServiceName, "-p", "'{\"apitoken\":\"secretpaastoken\",\"apiurl\":\"https://s3.amazonaws.com/dt-paas/manifest\",\"environmentid\":\"envid\"}'")
 			_, err := command.CombinedOutput()
@@ -94,6 +93,7 @@ var _ = Describe("CF NodeJS Buildpack", func() {
 
 	Context("deploying a NodeJS app with Dynatrace agent with failing agent download and ignoring errors", func() {
 		It("checks if skipping download errors works", func() {
+
 			CredentialsServiceName := "dynatrace-" + cutlass.RandStringRunes(20) + "-service"
 			command := exec.Command("cf", "cups", CredentialsServiceName, "-p", "'{\"apitoken\":\"secretpaastoken\",\"apiurl\":\"https://s3.amazonaws.com/dt-paasFAILING/manifest\",\"environmentid\":\"envid\",\"skiperrors\":\"true\"}'")
 			_, err := command.CombinedOutput()
@@ -111,9 +111,9 @@ var _ = Describe("CF NodeJS Buildpack", func() {
 			Expect(app.Stdout.String()).To(ContainSubstring("Error during installer download, skipping installation"))
 		})
 	})
-
 	Context("deploying a NodeJS app with Dynatrace agent with two dynatrace services", func() {
 		It("check if service detection isn't disturbed by a service with tags", func() {
+
 			CredentialsServiceName := "dynatrace-" + cutlass.RandStringRunes(20) + "-service"
 			command := exec.Command("cf", "cups", CredentialsServiceName, "-p", "'{\"apitoken\":\"secretpaastoken\",\"apiurl\":\"https://s3.amazonaws.com/dt-paas/manifest\",\"environmentid\":\"envid\"}'")
 			_, err := command.CombinedOutput()
@@ -150,6 +150,7 @@ var _ = Describe("CF NodeJS Buildpack", func() {
 
 	Context("deploying a NodeJS app with Dynatrace agent with single credentials service and a redis service", func() {
 		It("checks if Dynatrace injection was successful", func() {
+
 			serviceName := "dynatrace-" + cutlass.RandStringRunes(20) + "-service"
 			command := exec.Command("cf", "cups", serviceName, "-p", "'{\"apitoken\":\"secretpaastoken\",\"apiurl\":\"https://s3.amazonaws.com/dt-paas/manifest\",\"environmentid\":\"envid\"}'")
 			_, err := command.CombinedOutput()
@@ -182,4 +183,7 @@ var _ = Describe("CF NodeJS Buildpack", func() {
 			Expect(app.GetBody("/")).To(ContainSubstring("\"DT_HOST_ID\":\"" + app.Name + "_0\""))
 		})
 	})
+
+	
 })
+

@@ -45,54 +45,16 @@ type MockTransport struct {
 func (m *MockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	url := req.URL.String()
 
-	method := req.Method
-	if method == "" {
-		// http.Request.Method is documented to default to GET:
-		method = http.MethodGet
-	}
-
 	// try and get a responder that matches the method and URL
-	key := method + " " + url
+	key := req.Method + " " + url
 	responder := m.responderForKey(key)
 
-	// if we weren't able to find a responder
-	if responder == nil {
-		strippedURL := *req.URL
-		strippedURL.RawQuery = ""
-		strippedURL.Fragment = ""
-
-		// go1.6 does not handle URL.ForceQuery, so in case it is set in go>1.6,
-		// remove the "?" manually if present.
-		surl := strings.TrimSuffix(strippedURL.String(), "?")
-
-		hasQueryString := url != surl
-
-		// if the URL contains a querystring then we strip off the
-		// querystring and try again.
-		if hasQueryString {
-			key = method + " " + surl
-			responder = m.responderForKey(key)
-		}
-
-		// if we weren't able to find a responder for the full URL, try with
-		// the path part only
-		if responder == nil {
-			keyPathAlone := method + " " + req.URL.Path
-			key = keyPathAlone
-
-			// First with querystring
-			if hasQueryString {
-				key += strings.TrimPrefix(url, surl) // concat after-path part
-				responder = m.responderForKey(key)
-			}
-
-			// Then using path alone
-			if responder == nil || key == keyPathAlone {
-				responder = m.responderForKey(keyPathAlone)
-			}
-		}
+	// if we weren't able to find a responder and the URL contains a querystring
+	// then we strip off the querystring and try again.
+	if responder == nil && strings.Contains(url, "?") {
+		key = req.Method + " " + strings.Split(url, "?")[0]
+		responder = m.responderForKey(key)
 	}
-
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	// if we found a responder, call it
@@ -171,10 +133,16 @@ func (m *MockTransport) CancelRequest(req *http.Request) {}
 func (m *MockTransport) responderForKey(key string) Responder {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.responders[key]
+	for k, r := range m.responders {
+		if k != key {
+			continue
+		}
+		return r
+	}
+	return nil
 }
 
-// RegisterResponder adds a new responder, associated with a given HTTP method and URL (or path).  When a
+// RegisterResponder adds a new responder, associated with a given HTTP method and URL.  When a
 // request comes in that matches, the responder will be called and the response returned to the client.
 func (m *MockTransport) RegisterResponder(method, url string, responder Responder) {
 	key := method + " " + url
@@ -326,7 +294,7 @@ func DeactivateAndReset() {
 	Reset()
 }
 
-// RegisterResponder adds a mock that will catch requests to the given HTTP method and URL (or path), then
+// RegisterResponder adds a mock that will catch requests to the given HTTP method and URL, then
 // route them to the Responder which will generate a response to be returned to the client.
 //
 // Example:
@@ -337,11 +305,7 @@ func DeactivateAndReset() {
 // 			httpmock.RegisterResponder("GET", "http://example.com/",
 // 				httpmock.NewStringResponder("hello world", 200))
 //
-// 			httpmock.RegisterResponder("GET", "/path/only",
-// 				httpmock.NewStringResponder("any host hello world", 200))
-//
-//			// requests to http://example.com/ will now return 'hello world' and
-//			// requests to any host with path /path/only will return 'any host hello world'
+//			// requests to http://example.com/ will now return 'hello world'
 // 		}
 func RegisterResponder(method, url string, responder Responder) {
 	DefaultTransport.RegisterResponder(method, url, responder)

@@ -17,7 +17,7 @@ var _ = Describe("Flags Specs", func() {
 
 	BeforeEach(func() {
 		pathToTest = tmpPath("flags")
-		copyIn(fixturePath("flags_tests"), pathToTest, false)
+		copyIn("flags_tests", pathToTest)
 	})
 
 	getRandomOrders := func(output string) []int {
@@ -158,7 +158,7 @@ var _ = Describe("Flags Specs", func() {
 
 	It("should fail fast when told to", func() {
 		pathToTest = tmpPath("fail")
-		copyIn(fixturePath("fail_fixture"), pathToTest, false)
+		copyIn("fail_fixture", pathToTest)
 		session := startGinkgo(pathToTest, "--failFast")
 		Eventually(session).Should(gexec.Exit(1))
 		output := string(session.Out.Contents())
@@ -181,7 +181,7 @@ var _ = Describe("Flags Specs", func() {
 
 	It("should perform a dry run when told to", func() {
 		pathToTest = tmpPath("fail")
-		copyIn(fixturePath("fail_fixture"), pathToTest, false)
+		copyIn("fail_fixture", pathToTest)
 		session := startGinkgo(pathToTest, "--dryRun", "-v")
 		Eventually(session).Should(gexec.Exit(0))
 		output := string(session.Out.Contents())
@@ -194,7 +194,7 @@ var _ = Describe("Flags Specs", func() {
 
 	regextest := func(regexOption string, skipOrFocus string) string {
 		pathToTest = tmpPath("passing")
-		copyIn(fixturePath("passing_ginkgo_tests"), pathToTest, false)
+		copyIn("passing_ginkgo_tests", pathToTest)
 		session := startGinkgo(pathToTest, regexOption, "--dryRun", "-v", skipOrFocus)
 		Eventually(session).Should(gexec.Exit(0))
 		return string(session.Out.Contents())
@@ -213,7 +213,6 @@ var _ = Describe("Flags Specs", func() {
 		output = regextest("-regexScansFilePath=false", "-focus=/passing/") // nothing gets focused (nothing runs)
 		Ω(output).Should(ContainSubstring("0 of 4 Specs"))
 	})
-
 	It("should honor compiler flags", func() {
 		session := startGinkgo(pathToTest, "-gcflags=-importmap 'math=math/cmplx'")
 		Eventually(session).Should(gexec.Exit(types.GINKGO_FOCUS_EXIT_CODE))

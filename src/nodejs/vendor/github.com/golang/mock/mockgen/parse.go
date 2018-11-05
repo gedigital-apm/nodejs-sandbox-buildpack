@@ -44,12 +44,6 @@ func ParseFile(source string) (*model.Package, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed getting source directory: %v", err)
 	}
-
-	var packageImport string
-	if p, err := build.ImportDir(srcDir, 0); err == nil {
-		packageImport = p.ImportPath
-	} // TODO: should we fail if this returns an error?
-
 	fs := token.NewFileSet()
 	file, err := parser.ParseFile(fs, source, nil, 0)
 	if err != nil {
@@ -84,9 +78,9 @@ func ParseFile(source string) (*model.Package, error) {
 	if err := p.parseAuxFiles(*auxFiles); err != nil {
 		return nil, err
 	}
-	p.addAuxInterfacesFromFile(packageImport, file) // this file
+	p.addAuxInterfacesFromFile("", file) // this file
 
-	pkg, err := p.parseFile(packageImport, file)
+	pkg, err := p.parseFile(file)
 	if err != nil {
 		return nil, err
 	}
@@ -125,14 +119,12 @@ func (p *fileParser) parseAuxFiles(auxFiles string) error {
 		if len(parts) != 2 {
 			return fmt.Errorf("bad aux file spec: %v", kv)
 		}
-		pkg, fpath := parts[0], parts[1]
-
-		file, err := parser.ParseFile(p.fileSet, fpath, nil, 0)
+		file, err := parser.ParseFile(p.fileSet, parts[1], nil, 0)
 		if err != nil {
 			return err
 		}
 		p.auxFiles = append(p.auxFiles, file)
-		p.addAuxInterfacesFromFile(pkg, file)
+		p.addAuxInterfacesFromFile(parts[0], file)
 	}
 	return nil
 }
@@ -146,9 +138,7 @@ func (p *fileParser) addAuxInterfacesFromFile(pkg string, file *ast.File) {
 	}
 }
 
-// parseFile loads all file imports and auxiliary files import into the
-// fileParser, parses all file interfaces and returns package model.
-func (p *fileParser) parseFile(importPath string, file *ast.File) (*model.Package, error) {
+func (p *fileParser) parseFile(file *ast.File) (*model.Package, error) {
 	allImports := importsOfFile(file)
 	// Don't stomp imports provided by -imports. Those should take precedence.
 	for pkg, path := range allImports {
@@ -168,7 +158,7 @@ func (p *fileParser) parseFile(importPath string, file *ast.File) (*model.Packag
 
 	var is []*model.Interface
 	for ni := range iterInterfaces(file) {
-		i, err := p.parseInterface(ni.name.String(), importPath, ni.it)
+		i, err := p.parseInterface(ni.name.String(), "", ni.it)
 		if err != nil {
 			return nil, err
 		}
@@ -180,8 +170,6 @@ func (p *fileParser) parseFile(importPath string, file *ast.File) (*model.Packag
 	}, nil
 }
 
-// parsePackage loads package specified by path, parses it and populates
-// corresponding imports and importedInterfaces into the fileParser.
 func (p *fileParser) parsePackage(path string) error {
 	var pkgs map[string]*ast.Package
 	if imp, err := build.Import(path, p.srcDir, build.FindOnly); err != nil {
@@ -429,34 +417,30 @@ func (p *fileParser) parseType(pkg string, typ ast.Expr) (model.Type, error) {
 // importsOfFile returns a map of package name to import path
 // of the imports in file.
 func importsOfFile(file *ast.File) map[string]string {
+	/* We have to make guesses about some imports, because imports are not required
+	 * to have names. Named imports are always certain. Unnamed imports are guessed
+	 * to have a name of the last path component; if the last path component has dots,
+	 * the first dot-delimited field is used as the name.
+	 */
+
 	m := make(map[string]string)
 	for _, is := range file.Imports {
-		var pkgName string
+		var pkg string
 		importPath := is.Path.Value[1 : len(is.Path.Value)-1] // remove quotes
 
 		if is.Name != nil {
-			// Named imports are always certain.
 			if is.Name.Name == "_" {
 				continue
 			}
-			pkgName = removeDot(is.Name.Name)
+			pkg = removeDot(is.Name.Name)
 		} else {
-			pkg, err := build.Import(importPath, "", 0)
-			if err != nil {
-				// Fallback to import path suffix. Note that this is uncertain.
-				_, last := path.Split(importPath)
-				// If the last path component has dots, the first dot-delimited
-				// field is used as the name.
-				pkgName = strings.SplitN(last, ".", 2)[0]
-			} else {
-				pkgName = pkg.Name
-			}
+			_, last := path.Split(importPath)
+			pkg = strings.SplitN(last, ".", 2)[0]
 		}
-
-		if _, ok := m[pkgName]; ok {
-			log.Fatalf("imported package collision: %q imported twice", pkgName)
+		if _, ok := m[pkg]; ok {
+			log.Fatalf("imported package collision: %q imported twice", pkg)
 		}
-		m[pkgName] = importPath
+		m[pkg] = importPath
 	}
 	return m
 }

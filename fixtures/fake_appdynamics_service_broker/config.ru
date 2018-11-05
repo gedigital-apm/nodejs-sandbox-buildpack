@@ -1,12 +1,11 @@
 require 'roda'
-require 'erb'
 
 class App < Roda
   plugin :default_headers, 'Content-Type'=>'application/json'
 
   route do |r|
     r.on 'v2/catalog' do
-      ERB.new(open('catalog.json.erb').read).result
+      open('catalog.json').read
     end
 
     r.on 'v2/service_instances', String do |name|
