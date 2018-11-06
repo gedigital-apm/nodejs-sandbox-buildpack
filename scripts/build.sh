@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-set -exuo pipefail
+set -ex
 
-cd "$( dirname "${BASH_SOURCE[0]}" )/.."
-source .envrc
+ROOTDIR="$( dirname "$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )" )"
+BINDIR=$ROOTDIR/bin
 
-GOOS=linux go build -ldflags="-s -w" -o bin/supply nodejs/supply/cli
-GOOS=linux go build -ldflags="-s -w" -o bin/finalize nodejs/finalize/cli
+export GOPATH=$ROOTDIR
+export GOOS=linux
+
+go build -ldflags="-s -w" -o $BINDIR/supply nodejs/supply/cli
+go build -ldflags="-s -w" -o $BINDIR/finalize nodejs/finalize/cli

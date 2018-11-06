@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$( dirname "${BASH_SOURCE[0]}" )/.."
-source .envrc
-./scripts/install_tools.sh
+export ROOT=`dirname $(readlink -f ${BASH_SOURCE%/*})`
+if [ ! -f $ROOT/.bin/ginkgo ]; then
+  (cd $ROOT/src/nodejs/vendor/github.com/onsi/ginkgo/ginkgo/ && go install)
+fi
 
-cd src/*/integration/..
-ginkgo -r -skipPackage=brats,integration,acceptance
+cd $ROOT/src/nodejs/
+ginkgo -r -skipPackage=integration

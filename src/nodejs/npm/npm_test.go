@@ -16,11 +16,10 @@ import (
 
 //go:generate mockgen -source=npm.go --destination=mocks_test.go --package=npm_test
 
-var _ = Describe("NPM", func() {
+var _ = Describe("Yarn", func() {
 	var (
 		err         error
 		buildDir    string
-		cacheDir    string
 		npm         *n.NPM
 		logger      *libbuildpack.Logger
 		buffer      *bytes.Buffer
@@ -31,8 +30,6 @@ var _ = Describe("NPM", func() {
 	BeforeEach(func() {
 		buildDir, err = ioutil.TempDir("", "nodejs-buildpack.build.")
 		Expect(err).To(BeNil())
-		cacheDir, err = ioutil.TempDir("", "nodejs-buildpack.cache.")
-		Expect(err).To(BeNil())
 
 		buffer = new(bytes.Buffer)
 
@@ -42,8 +39,9 @@ var _ = Describe("NPM", func() {
 		mockCommand = NewMockCommand(mockCtrl)
 
 		npm = &n.NPM{
-			Log:     logger,
-			Command: mockCommand,
+			BuildDir: buildDir,
+			Log:      logger,
+			Command:  mockCommand,
 		}
 	})
 
@@ -58,18 +56,7 @@ var _ = Describe("NPM", func() {
 		Context("package.json exists", func() {
 			BeforeEach(func() {
 				Expect(ioutil.WriteFile(filepath.Join(buildDir, "package.json"), []byte("xxx"), 0644)).To(Succeed())
-				mockCommand.EXPECT().Execute(buildDir, gomock.Any(), gomock.Any(), "npm", []string{"install", "--unsafe-perm", "--userconfig", filepath.Join(buildDir, ".npmrc"), "--cache", filepath.Join(cacheDir, ".npm")}).Return(nil)
-			})
-
-			Context("package-lock.json exists", func() {
-				BeforeEach(func() {
-					Expect(ioutil.WriteFile(filepath.Join(buildDir, "package-lock.json"), []byte("yyy"), 0644)).To(Succeed())
-				})
-
-				It("runs the install, telling users about shrinkwrap", func() {
-					Expect(npm.Build(buildDir, cacheDir)).To(Succeed())
-					Expect(buffer.String()).To(ContainSubstring("Installing node modules (package.json + package-lock.json)"))
-				})
+				mockCommand.EXPECT().Execute(buildDir, gomock.Any(), gomock.Any(), "npm", "install", "--unsafe-perm", "--userconfig", filepath.Join(buildDir, ".npmrc"), "--cache", filepath.Join(buildDir, ".npm")).Return(nil)
 			})
 
 			Context("npm-shrinkwrap.json exists", func() {
@@ -78,14 +65,14 @@ var _ = Describe("NPM", func() {
 				})
 
 				It("runs the install, telling users about shrinkwrap", func() {
-					Expect(npm.Build(buildDir, cacheDir)).To(Succeed())
-					Expect(buffer.String()).To(ContainSubstring("Installing node modules (package.json + npm-shrinkwrap.json)"))
+					Expect(npm.Build()).To(Succeed())
+					Expect(buffer.String()).To(ContainSubstring("Installing node modules (package.json + shrinkwrap)"))
 				})
 			})
 
-			Context("neither package-lock.json nor npm-shrinkwrap.json exist", func() {
+			Context("npm-shrinkwrap.json does not exist", func() {
 				It("runs the install", func() {
-					Expect(npm.Build(buildDir, cacheDir)).To(Succeed())
+					Expect(npm.Build()).To(Succeed())
 					Expect(buffer.String()).To(ContainSubstring("Installing node modules (package.json)"))
 				})
 			})
@@ -93,7 +80,7 @@ var _ = Describe("NPM", func() {
 
 		Context("package.json does not exist", func() {
 			It("skips the install", func() {
-				Expect(npm.Build(buildDir, cacheDir)).To(Succeed())
+				Expect(npm.Build()).To(Succeed())
 				Expect(buffer.String()).To(ContainSubstring("Skipping (no package.json)"))
 			})
 		})
@@ -115,8 +102,8 @@ var _ = Describe("NPM", func() {
 			BeforeEach(func() {
 				Expect(ioutil.WriteFile(filepath.Join(buildDir, "package.json"), []byte("xxx"), 0644)).To(Succeed())
 				gomock.InOrder(
-					mockCommand.EXPECT().Execute(buildDir, gomock.Any(), gomock.Any(), "npm", []string{"rebuild", "--nodedir=test_node_home"}).Return(nil),
-					mockCommand.EXPECT().Execute(buildDir, gomock.Any(), gomock.Any(), "npm", []string{"install", "--unsafe-perm", "--userconfig", filepath.Join(buildDir, ".npmrc")}).Return(nil),
+					mockCommand.EXPECT().Execute(buildDir, gomock.Any(), gomock.Any(), "npm", "rebuild", "--nodedir=test_node_home").Return(nil),
+					mockCommand.EXPECT().Execute(buildDir, gomock.Any(), gomock.Any(), "npm", "install", "--unsafe-perm", "--userconfig", filepath.Join(buildDir, ".npmrc")).Return(nil),
 				)
 			})
 
@@ -126,15 +113,15 @@ var _ = Describe("NPM", func() {
 				})
 
 				It("runs the install, telling users about shrinkwrap", func() {
-					Expect(npm.Rebuild(buildDir)).To(Succeed())
+					Expect(npm.Rebuild()).To(Succeed())
 					Expect(buffer.String()).To(ContainSubstring("Rebuilding any native modules"))
-					Expect(buffer.String()).To(ContainSubstring("Installing any new modules (package.json + npm-shrinkwrap.json)"))
+					Expect(buffer.String()).To(ContainSubstring("Installing any new modules (package.json + shrinkwrap)"))
 				})
 			})
 
 			Context("npm-shrinkwrap.json does not exist", func() {
 				It("runs the install", func() {
-					Expect(npm.Rebuild(buildDir)).To(Succeed())
+					Expect(npm.Rebuild()).To(Succeed())
 					Expect(buffer.String()).To(ContainSubstring("Rebuilding any native modules"))
 					Expect(buffer.String()).To(ContainSubstring("Installing any new modules (package.json)"))
 				})
@@ -143,7 +130,7 @@ var _ = Describe("NPM", func() {
 
 		Context("package.json does not exist", func() {
 			It("skips the install", func() {
-				Expect(npm.Rebuild(buildDir)).To(Succeed())
+				Expect(npm.Rebuild()).To(Succeed())
 				Expect(buffer.String()).To(ContainSubstring("Skipping (no package.json)"))
 			})
 		})

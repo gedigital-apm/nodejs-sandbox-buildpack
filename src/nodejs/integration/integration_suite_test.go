@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/blang/semver"
 	"github.com/cloudfoundry/libbuildpack/cutlass"
 
 	. "github.com/onsi/ginkgo"
@@ -32,8 +33,8 @@ func init() {
 var _ = SynchronizedBeforeSuite(func() []byte {
 	// Run once
 	if buildpackVersion == "" {
-		packagedBuildpack, err := cutlass.PackageUniquelyVersionedBuildpack(os.Getenv("CF_STACK"), ApiHasStackAssociation())
-		Expect(err).NotTo(HaveOccurred(), "failed to package buildpack")
+		packagedBuildpack, err := cutlass.PackageUniquelyVersionedBuildpack()
+		Expect(err).NotTo(HaveOccurred())
 
 		data, err := json.Marshal(packagedBuildpack)
 		Expect(err).NotTo(HaveOccurred())
@@ -53,7 +54,6 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 	bpDir, err = cutlass.FindRoot()
 	Expect(err).NotTo(HaveOccurred())
 
-	Expect(cutlass.CopyCfHome()).To(Succeed())
 	cutlass.SeedRandom()
 	cutlass.DefaultStdoutStderr = GinkgoWriter
 })
@@ -77,35 +77,14 @@ func PushAppAndConfirm(app *cutlass.App) {
 	Expect(app.ConfirmBuildpack(buildpackVersion)).To(Succeed())
 }
 
-func DestroyApp(app *cutlass.App) *cutlass.App {
-	if app != nil {
-		app.Destroy()
-	}
-	return nil
-}
-
 func ApiHasTask() bool {
-	supported, err := cutlass.ApiGreaterThan("2.75.0")
-	Expect(err).NotTo(HaveOccurred())
-	return supported
-}
-
-func ApiHasMultiBuildpack() bool {
-	supported, err := cutlass.ApiGreaterThan("2.90.0")
-	Expect(err).NotTo(HaveOccurred(), "the targeted CF does not support multiple buildpacks")
-	return supported
-}
-
-func ApiSupportsSymlinks() bool {
-	supported, err := cutlass.ApiGreaterThan("2.103.0")
-	Expect(err).NotTo(HaveOccurred(), "the targeted CF does not support symlinks")
-	return supported
-}
-
-func ApiHasStackAssociation() bool {
-	supported, err := cutlass.ApiGreaterThan("2.113.0")
-	Expect(err).NotTo(HaveOccurred(), "the targeted CF does not support stack association")
-	return supported
+	apiVersionString, err := cutlass.ApiVersion()
+	Expect(err).To(BeNil())
+	apiVersion, err := semver.Make(apiVersionString)
+	Expect(err).To(BeNil())
+	apiHasTask, err := semver.ParseRange("> 2.75.0")
+	Expect(err).To(BeNil())
+	return apiHasTask(apiVersion)
 }
 
 func AssertUsesProxyDuringStagingIfPresent(fixtureName string) {
@@ -127,14 +106,13 @@ func AssertUsesProxyDuringStagingIfPresent(fixtureName string) {
 			Expect(err).To(BeNil())
 			defer os.Remove(bpFile)
 
-			traffic, _, _, err := cutlass.InternetTraffic(
+			traffic, err := cutlass.InternetTraffic(
 				bpDir,
 				filepath.Join("fixtures", fixtureName),
 				bpFile,
 				[]string{"HTTP_PROXY=" + proxy.URL, "HTTPS_PROXY=" + proxy.URL},
 			)
 			Expect(err).To(BeNil())
-			// Expect(built).To(BeTrue())
 
 			destUrl, err := url.Parse(proxy.URL)
 			Expect(err).To(BeNil())
@@ -158,21 +136,13 @@ func AssertNoInternetTraffic(fixtureName string) {
 		Expect(err).To(BeNil())
 		defer os.Remove(bpFile)
 
-		traffic, _, _, err := cutlass.InternetTraffic(
+		traffic, err := cutlass.InternetTraffic(
 			bpDir,
 			filepath.Join("fixtures", fixtureName),
 			bpFile,
 			[]string{},
 		)
 		Expect(err).To(BeNil())
-		// Expect(built).To(BeTrue())
 		Expect(traffic).To(BeEmpty())
 	})
-}
-
-func RunCF(args ...string) error {
-	command := exec.Command("cf", args...)
-	command.Stdout = GinkgoWriter
-	command.Stderr = GinkgoWriter
-	return command.Run()
 }

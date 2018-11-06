@@ -1,5 +1,5 @@
-var fs = require('fs')
-var child_process = require('child_process');
+// web.js
+
 var appdynamics = require("appdynamics").profile({
   controllerHostName: process.env.APPDYNAMICS_CONTROLLER_HOST_NAME,
   controllerPort: process.env.APPDYNAMICS_CONTROLLER_PORT,
@@ -19,16 +19,6 @@ app.use(logfmt.requestLogger());
 
 app.get('/', function(req, res) {
   res.send('Hello, World!');
-});
-
-app.get('/config', function(req, res) {
-  child_process.exec('cat /tmp/appd/*/*.json', {}, function(err, stdout, stderr) {
-    console.log(err, stdout, stderr);
-    if (err) {
-      res.send(err);
-    }
-    res.send(stdout);
-  });
 });
 
 var port = Number(process.env.PORT || 5000);

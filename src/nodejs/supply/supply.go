@@ -3,17 +3,22 @@ package supply
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
-	"nodejs/package_json"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/cloudfoundry/libbuildpack"
-	"github.com/cloudfoundry/libbuildpack/checksum"
 )
+
+type Cache interface {
+	Initialize() error
+	Restore() error
+	Save() error
+}
 
 type Command interface {
 	Execute(string, io.Writer, io.Writer, string, ...string) error
@@ -22,25 +27,21 @@ type Command interface {
 type Manifest interface {
 	AllDependencyVersions(string) []string
 	DefaultVersion(string) (libbuildpack.Dependency, error)
-}
-
-type Installer interface {
 	InstallDependency(libbuildpack.Dependency, string) error
 	InstallOnlyVersion(string, string) error
 }
 
 type NPM interface {
-	Build(string, string) error
-	Rebuild(string) error
+	Build() error
+	Rebuild() error
 }
 
 type Yarn interface {
-	Build(string, string) error
+	Build() error
 }
 
 type Stager interface {
 	BuildDir() string
-	CacheDir() string
 	DepDir() string
 	DepsIdx() string
 	LinkDirectoryInDepDir(string, string) error
@@ -52,7 +53,6 @@ type Stager interface {
 type Supplier struct {
 	Stager             Stager
 	Manifest           Manifest
-	Installer          Installer
 	Log                *libbuildpack.Logger
 	Logfile            *os.File
 	Command            Command
@@ -64,96 +64,108 @@ type Supplier struct {
 	HasDevDependencies bool
 	PostBuild          string
 	UseYarn            bool
-	UsesYarnWorkspaces bool
-	IsVendored         bool
+	NPMRebuild         bool
+	Cache              Cache
 	Yarn               Yarn
 	NPM                NPM
 }
 
+type packageJSON struct {
+	Engines engines `json:"engines"`
+}
+
+type engines struct {
+	Node string `json:"node"`
+	Yarn string `json:"yarn"`
+	NPM  string `json:"npm"`
+	Iojs string `json:"iojs"`
+}
+
 func Run(s *Supplier) error {
-	return checksum.Do(s.Stager.BuildDir(), s.Log.Debug, func() error {
-		s.Log.BeginStep("Installing binaries")
-		if err := s.LoadPackageJSON(); err != nil {
-			s.Log.Error("Unable to load package.json: %s", err.Error())
-			return err
-		}
+	s.Log.BeginStep("Installing binaries")
+	if err := s.LoadPackageJSON(); err != nil {
+		s.Log.Error("Unable to load package.json: %s", err.Error())
+		return err
+	}
 
-		s.WarnNodeEngine()
+	s.WarnNodeEngine()
 
-		if err := s.InstallNode("/tmp/node"); err != nil {
-			s.Log.Error("Unable to install node: %s", err.Error())
-			return err
-		}
+	if err := s.InstallNode("/tmp/node"); err != nil {
+		s.Log.Error("Unable to install node: %s", err.Error())
+		return err
+	}
 
-		if err := s.InstallNPM(); err != nil {
-			s.Log.Error("Unable to install npm: %s", err.Error())
-			return err
-		}
+	if err := s.InstallNPM(); err != nil {
+		s.Log.Error("Unable to install npm: %s", err.Error())
+		return err
+	}
 
-		if err := s.InstallYarn(); err != nil {
-			s.Log.Error("Unable to install yarn: %s", err.Error())
-			return err
-		}
+	if err := s.InstallYarn(); err != nil {
+		s.Log.Error("Unable to install yarn: %s", err.Error())
+		return err
+	}
 
-		if err := s.CreateDefaultEnv(); err != nil {
-			s.Log.Error("Unable to setup default environment: %s", err.Error())
-			return err
-		}
+	if err := s.CreateDefaultEnv(); err != nil {
+		s.Log.Error("Unable to setup default environment: %s", err.Error())
+		return err
+	}
 
-		if err := s.Stager.SetStagingEnvironment(); err != nil {
-			s.Log.Error("Unable to setup environment variables: %s", err.Error())
-			os.Exit(11)
-		}
+	if err := s.Stager.SetStagingEnvironment(); err != nil {
+		s.Log.Error("Unable to setup environment variables: %s", err.Error())
+		os.Exit(11)
+	}
 
-		if err := s.ReadPackageJSON(); err != nil {
-			s.Log.Error("Failed parsing package.json: %s", err.Error())
-			return err
-		}
+	if err := s.ReadPackageJSON(); err != nil {
+		s.Log.Error("Failed parsing package.json: %s", err.Error())
+		return err
+	}
 
-		if err := s.TipVendorDependencies(); err != nil {
-			s.Log.Error(err.Error())
-			return err
-		}
+	if err := s.TipVendorDependencies(); err != nil {
+		s.Log.Error(err.Error())
+		return err
+	}
 
-		s.ListNodeConfig(os.Environ())
+	s.ListNodeConfig(os.Environ())
 
-		if err := s.OverrideCacheFromApp(); err != nil {
-			s.Log.Error("Unable to copy cache directories: %s", err.Error())
-			return err
-		}
+	if err := s.Cache.Initialize(); err != nil {
+		s.Log.Error("Unable to initialize cache: %s", err.Error())
+		return err
+	}
 
-		defer func() {
-			s.Logfile.Sync()
-			s.WarnUntrackedDependencies()
-			s.WarnMissingDevDeps()
-		}()
+	if err := s.Cache.Restore(); err != nil {
+		s.Log.Error("Unable to restore cache: %s", err.Error())
+		return err
+	}
 
-		if err := s.BuildDependencies(); err != nil {
-			s.Log.Error("Unable to build dependencies: %s", err.Error())
-			return err
-		}
+	defer func() {
+		s.Logfile.Sync()
+		s.WarnUntrackedDependencies()
+		s.WarnMissingDevDeps()
+	}()
 
-		if !s.UseYarn || !s.UsesYarnWorkspaces {
-			if err := s.MoveDependencyArtifacts(); err != nil {
-				s.Log.Error("Unable to move dependencies: %s", err.Error())
-				return err
-			}
-		}
+	if err := s.BuildDependencies(); err != nil {
+		s.Log.Error("Unable to build dependencies: %s", err.Error())
+		return err
+	}
 
-		s.ListDependencies()
+	if err := s.Cache.Save(); err != nil {
+		s.Log.Error("Unable to save cache: %s", err.Error())
+		return err
+	}
 
-		if err := s.Logfile.Sync(); err != nil {
-			s.Log.Error(err.Error())
-			return err
-		}
+	s.ListDependencies()
 
-		if err := s.WarnUnmetDependencies(); err != nil {
-			s.Log.Error(err.Error())
-			return err
-		}
+	if err := s.Logfile.Sync(); err != nil {
+		s.Log.Error(err.Error())
+		return err
+	}
 
-		return nil
-	})
+	if err := s.WarnUnmetDependencies(); err != nil {
+		s.Log.Error(err.Error())
+		return err
+	}
+
+	return nil
 }
 
 func (s *Supplier) WarnUnmetDependencies() error {
@@ -229,17 +241,19 @@ func (s *Supplier) BuildDependencies() error {
 	}
 
 	if s.UseYarn {
-		if err := s.Yarn.Build(s.Stager.BuildDir(), s.Stager.CacheDir()); err != nil {
-			return err
-		}
-	} else if s.IsVendored {
-		s.Log.Info("Prebuild detected (node_modules already exists)")
-		if err := s.NPM.Rebuild(s.Stager.BuildDir()); err != nil {
+		if err := s.Yarn.Build(); err != nil {
 			return err
 		}
 	} else {
-		if err := s.NPM.Build(s.Stager.BuildDir(), s.Stager.CacheDir()); err != nil {
-			return err
+		if s.NPMRebuild {
+			s.Log.Info("Prebuild detected (node_modules already exists)")
+			if err := s.NPM.Rebuild(); err != nil {
+				return err
+			}
+		} else {
+			if err := s.NPM.Build(); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -248,34 +262,6 @@ func (s *Supplier) BuildDependencies() error {
 	}
 
 	return nil
-}
-
-func (s *Supplier) MoveDependencyArtifacts() error {
-	if s.IsVendored {
-		return nil
-	}
-
-	appNodeModules := filepath.Join(s.Stager.BuildDir(), "node_modules")
-
-	_, err := os.Stat(appNodeModules)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-
-	nodePath := filepath.Join(s.Stager.DepDir(), "node_modules")
-
-	if err := os.Rename(appNodeModules, nodePath); err != nil {
-		return err
-	}
-
-	if err := s.Stager.WriteEnvFile("NODE_PATH", nodePath); err != nil {
-		return err
-	}
-
-	return os.Setenv("NODE_PATH", nodePath)
 }
 
 func (s *Supplier) ReadPackageJSON() error {
@@ -287,14 +273,13 @@ func (s *Supplier) ReadPackageJSON() error {
 			StartScript string `json:"start"`
 		} `json:"scripts"`
 		DevDependencies map[string]string `json:"devDependencies"`
-		Workspaces      []string          `json:"workspaces"`
 	}
 
 	if s.UseYarn, err = libbuildpack.FileExists(filepath.Join(s.Stager.BuildDir(), "yarn.lock")); err != nil {
 		return err
 	}
 
-	if s.IsVendored, err = libbuildpack.FileExists(filepath.Join(s.Stager.BuildDir(), "node_modules")); err != nil {
+	if s.NPMRebuild, err = libbuildpack.FileExists(filepath.Join(s.Stager.BuildDir(), "node_modules")); err != nil {
 		return err
 	}
 
@@ -307,7 +292,6 @@ func (s *Supplier) ReadPackageJSON() error {
 		}
 	}
 
-	s.UsesYarnWorkspaces = (len(p.Workspaces) > 0)
 	s.HasDevDependencies = (len(p.DevDependencies) > 0)
 	s.PreBuild = p.Scripts.PreBuild
 	s.PostBuild = p.Scripts.PostBuild
@@ -426,9 +410,27 @@ func fileHasString(file string, patterns ...string) (bool, error) {
 }
 
 func (s *Supplier) LoadPackageJSON() error {
-	p, err := package_json.LoadPackageJSON(filepath.Join(s.Stager.BuildDir(), "package.json"), s.Log)
-	if err != nil {
+	var p packageJSON
+
+	err := libbuildpack.NewJSON().Load(filepath.Join(s.Stager.BuildDir(), "package.json"), &p)
+	if err != nil && !os.IsNotExist(err) {
 		return err
+	}
+
+	if p.Engines.Iojs != "" {
+		return errors.New("io.js not supported by this buildpack")
+	}
+
+	if p.Engines.Node != "" {
+		s.Log.Info("engines.node (package.json): %s", p.Engines.Node)
+	} else {
+		s.Log.Info("engines.node (package.json): unspecified")
+	}
+
+	if p.Engines.NPM != "" {
+		s.Log.Info("engines.npm (package.json): %s", p.Engines.NPM)
+	} else {
+		s.Log.Info("engines.npm (package.json): unspecified (use default)")
 	}
 
 	s.NodeVersion = p.Engines.Node
@@ -475,7 +477,7 @@ func (s *Supplier) InstallNode(tempDir string) error {
 		}
 	}
 
-	if err := s.Installer.InstallDependency(dep, tempDir); err != nil {
+	if err := s.Manifest.InstallDependency(dep, tempDir); err != nil {
 		return err
 	}
 
@@ -529,7 +531,7 @@ func (s *Supplier) InstallYarn() error {
 
 	yarnInstallDir := filepath.Join(s.Stager.DepDir(), "yarn")
 
-	if err := s.Installer.InstallOnlyVersion("yarn", yarnInstallDir); err != nil {
+	if err := s.Manifest.InstallOnlyVersion("yarn", yarnInstallDir); err != nil {
 		return err
 	}
 
@@ -581,63 +583,12 @@ func (s *Supplier) CreateDefaultEnv() error {
 		return err
 	}
 
-	scriptContents := `export NODE_HOME=%[1]s
+	scriptContents := `export NODE_HOME=%s
 export NODE_ENV=${NODE_ENV:-production}
 export MEMORY_AVAILABLE=$(echo $VCAP_APPLICATION | jq '.limits.mem')
 export WEB_MEMORY=${WEB_MEMORY:-512}
 export WEB_CONCURRENCY=${WEB_CONCURRENCY:-1}
-if [ ! -d "$HOME/node_modules" ]; then
-	export NODE_PATH=${NODE_PATH:-"%[2]s"}
-	ln -s "%[2]s" "$HOME/node_modules"
-else
-	export NODE_PATH=${NODE_PATH:-"$HOME/node_modules"}
-fi
-export PATH=$PATH:"$HOME/bin":$NODE_PATH/.bin
 `
-	return s.Stager.WriteProfileD("node.sh",
-		fmt.Sprintf(scriptContents,
-			filepath.Join("$DEPS_DIR", s.Stager.DepsIdx(), "node"),
-			filepath.Join("$DEPS_DIR", s.Stager.DepsIdx(), "node_modules")))
-}
 
-func copyAll(srcDir, destDir string, files []string) error {
-	for _, filename := range files {
-		fi, err := os.Stat(filepath.Join(srcDir, filename))
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return err
-		}
-		if fi.IsDir() {
-			if err := os.RemoveAll(filepath.Join(destDir, filename)); err != nil {
-				return err
-			}
-			if err := os.MkdirAll(filepath.Join(destDir, filename), 0755); err != nil {
-				return err
-			}
-			if err := libbuildpack.CopyDirectory(filepath.Join(srcDir, filename), filepath.Join(destDir, filename)); err != nil && !os.IsNotExist(err) {
-				return err
-			}
-		} else {
-			if err := libbuildpack.CopyFile(filepath.Join(srcDir, filename), filepath.Join(destDir, filename)); err != nil && !os.IsNotExist(err) {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func (s *Supplier) OverrideCacheFromApp() error {
-	deprecatedCacheDirs := []string{"bower_components"}
-	for _, name := range deprecatedCacheDirs {
-		os.RemoveAll(filepath.Join(s.Stager.CacheDir(), name))
-	}
-
-	pkgMgrCacheDirs := []string{".cache/yarn", ".npm"}
-	if err := copyAll(s.Stager.BuildDir(), s.Stager.CacheDir(), pkgMgrCacheDirs); err != nil {
-		return err
-	}
-
-	return nil
+	return s.Stager.WriteProfileD("node.sh", fmt.Sprintf(scriptContents, filepath.Join("$DEPS_DIR", s.Stager.DepsIdx(), "node")))
 }
