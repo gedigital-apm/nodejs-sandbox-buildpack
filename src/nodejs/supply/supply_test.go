@@ -34,7 +34,6 @@ var _ = Describe("Supply", func() {
 		mockYarn        *MockYarn
 		mockNPM         *MockNPM
 		mockManifest    *MockManifest
-		mockInstaller   *MockInstaller
 		mockCommand     *MockCommand
 		installNode     func(libbuildpack.Dependency, string)
 		installOnlyYarn func(string, string)
@@ -61,7 +60,6 @@ var _ = Describe("Supply", func() {
 
 		mockCtrl = gomock.NewController(GinkgoT())
 		mockManifest = NewMockManifest(mockCtrl)
-		mockInstaller = NewMockInstaller(mockCtrl)
 		mockCommand = NewMockCommand(mockCtrl)
 		mockYarn = NewMockYarn(mockCtrl)
 		mockNPM = NewMockNPM(mockCtrl)
@@ -93,13 +91,12 @@ var _ = Describe("Supply", func() {
 		stager := libbuildpack.NewStager(args, logger, &libbuildpack.Manifest{})
 
 		supplier = &supply.Supplier{
-			Stager:    stager,
-			Yarn:      mockYarn,
-			NPM:       mockNPM,
-			Log:       logger,
-			Manifest:  mockManifest,
-			Installer: mockInstaller,
-			Command:   mockCommand,
+			Stager:   stager,
+			Yarn:     mockYarn,
+			NPM:      mockNPM,
+			Log:      logger,
+			Manifest: mockManifest,
+			Command:  mockCommand,
 		}
 	})
 
@@ -286,9 +283,11 @@ var _ = Describe("Supply", func() {
 	})
 
 	Describe("InstallNode", func() {
+		var nodeInstallDir string
 		var nodeTmpDir string
 
 		BeforeEach(func() {
+			nodeInstallDir = filepath.Join(depsDir, depsIdx, "node")
 			nodeTmpDir, err = ioutil.TempDir("", "nodejs-buildpack.temp")
 			Expect(err).To(BeNil())
 		})
@@ -305,7 +304,7 @@ var _ = Describe("Supply", func() {
 
 			It("installs the correct version from the manifest", func() {
 				dep := libbuildpack.Dependency{Name: "node", Version: "4.8.3"}
-				mockInstaller.EXPECT().InstallDependency(dep, nodeTmpDir).Do(installNode).Return(nil)
+				mockManifest.EXPECT().InstallDependency(dep, nodeTmpDir).Do(installNode).Return(nil)
 
 				supplier.NodeVersion = "~>4"
 				err = supplier.InstallNode(nodeTmpDir)
@@ -314,7 +313,7 @@ var _ = Describe("Supply", func() {
 
 			It("handles '>=6.11.1 <7.0'", func() {
 				dep := libbuildpack.Dependency{Name: "node", Version: "6.11.1"}
-				mockInstaller.EXPECT().InstallDependency(dep, nodeTmpDir).Do(installNode).Return(nil)
+				mockManifest.EXPECT().InstallDependency(dep, nodeTmpDir).Do(installNode).Return(nil)
 
 				supplier.NodeVersion = ">=6.11.1 <7.0.0"
 				err = supplier.InstallNode(nodeTmpDir)
@@ -323,7 +322,7 @@ var _ = Describe("Supply", func() {
 
 			It("handles '>=6.11.1, <7.0'", func() {
 				dep := libbuildpack.Dependency{Name: "node", Version: "6.11.1"}
-				mockInstaller.EXPECT().InstallDependency(dep, nodeTmpDir).Do(installNode).Return(nil)
+				mockManifest.EXPECT().InstallDependency(dep, nodeTmpDir).Do(installNode).Return(nil)
 
 				supplier.NodeVersion = ">=6.11.1, <7.0"
 				err = supplier.InstallNode(nodeTmpDir)
@@ -332,7 +331,7 @@ var _ = Describe("Supply", func() {
 
 			It("creates a symlink in <depDir>/bin", func() {
 				dep := libbuildpack.Dependency{Name: "node", Version: "6.10.2"}
-				mockInstaller.EXPECT().InstallDependency(dep, nodeTmpDir).Do(installNode).Return(nil)
+				mockManifest.EXPECT().InstallDependency(dep, nodeTmpDir).Do(installNode).Return(nil)
 
 				supplier.NodeVersion = "6.10.*"
 				err = supplier.InstallNode(nodeTmpDir)
@@ -354,7 +353,7 @@ var _ = Describe("Supply", func() {
 			It("installs the default version from the manifest", func() {
 				dep := libbuildpack.Dependency{Name: "node", Version: "6.10.2"}
 				mockManifest.EXPECT().DefaultVersion("node").Return(dep, nil)
-				mockInstaller.EXPECT().InstallDependency(dep, nodeTmpDir).Do(installNode).Return(nil)
+				mockManifest.EXPECT().InstallDependency(dep, nodeTmpDir).Do(installNode).Return(nil)
 
 				supplier.NodeVersion = ""
 
@@ -373,7 +372,7 @@ var _ = Describe("Supply", func() {
 
 		Context("yarn version is unset", func() {
 			BeforeEach(func() {
-				mockInstaller.EXPECT().InstallOnlyVersion("yarn", yarnInstallDir).Do(installOnlyYarn).Return(nil)
+				mockManifest.EXPECT().InstallOnlyVersion("yarn", yarnInstallDir).Do(installOnlyYarn).Return(nil)
 
 				mockCommand.EXPECT().Execute(buildDir, gomock.Any(), gomock.Any(), "yarn", "--version").Do(func(_ string, buffer io.Writer, _ io.Writer, _ string, _ string) {
 					buffer.Write([]byte("0.32.5\n"))
@@ -407,7 +406,7 @@ var _ = Describe("Supply", func() {
 			BeforeEach(func() {
 				versions := []string{"0.32.5"}
 				mockManifest.EXPECT().AllDependencyVersions("yarn").Return(versions)
-				mockInstaller.EXPECT().InstallOnlyVersion("yarn", yarnInstallDir).Do(installOnlyYarn).Return(nil)
+				mockManifest.EXPECT().InstallOnlyVersion("yarn", yarnInstallDir).Do(installOnlyYarn).Return(nil)
 
 				mockCommand.EXPECT().Execute(buildDir, gomock.Any(), gomock.Any(), "yarn", "--version").Do(func(_ string, buffer io.Writer, _ io.Writer, _ string, _ string) {
 					buffer.Write([]byte("0.32.5\n"))
@@ -1177,13 +1176,11 @@ var _ = Describe("Supply", func() {
 			Expect(string(contents)).To(ContainSubstring("export NODE_ENV=${NODE_ENV:-production}"))
 			nodePathString := `
 if [ ! -d "$HOME/node_modules" ]; then
-	export NODE_PATH=${NODE_PATH:-"$DEPS_DIR/14/node_modules"}
-	ln -s "$DEPS_DIR/14/node_modules" "$HOME/node_modules"
+	export NODE_PATH=${NODE_PATH:-$DEPS_DIR/14/node_modules}
+	export PATH=$PATH:$HOME/bin:$NODE_PATH/.bin
 else
-	export NODE_PATH=${NODE_PATH:-"$HOME/node_modules"}
-fi
-export PATH=$PATH:"$HOME/bin":$NODE_PATH/.bin
-`
+	export PATH=$PATH:$HOME/bin:$HOME/node_modules/.bin
+fi`
 			Expect(string(contents)).To(ContainSubstring(nodePathString))
 		})
 	})

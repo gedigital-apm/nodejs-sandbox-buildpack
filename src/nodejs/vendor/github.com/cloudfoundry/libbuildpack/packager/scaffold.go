@@ -9,7 +9,7 @@ import (
 	"text/template"
 
 	"github.com/cloudfoundry/libbuildpack"
-	"gopkg.in/yaml.v2"
+	yaml "gopkg.in/yaml.v2"
 )
 
 type sha struct {
@@ -59,7 +59,7 @@ func setupDep(bpDir, languageName string) error {
 	cmd.Stderr = Stderr
 	cmd.Env = append(os.Environ(), fmt.Sprintf("GOBIN=%s/.bin", bpDir), fmt.Sprintf("GOPATH=%s", tmpDir))
 	cmd.Dir = filepath.Join(bpDir, "src", languageName)
-
+	// cmd.Dir = bpDir
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("go get -u github.com/golang/dep/cmd/dep: %s", err)
 	}
@@ -68,20 +68,13 @@ func setupDep(bpDir, languageName string) error {
 	}
 
 	fmt.Fprintln(Stdout, "Running dep ensure")
-
-	canonicalBpDir, err := filepath.EvalSymlinks(bpDir)
-	if err != nil {
-		return err
-	}
-
 	cmd = exec.Command(filepath.Join(bpDir, ".bin", "dep"), "ensure")
 	cmd.Stdout = Stdout
 	cmd.Stderr = Stderr
-	cmd.Env = append(os.Environ(), fmt.Sprintf("GOBIN=%s/.bin", bpDir), fmt.Sprintf("GOPATH=%s", canonicalBpDir))
+	cmd.Env = append(os.Environ(), fmt.Sprintf("GOBIN=%s/.bin", bpDir), fmt.Sprintf("GOPATH=%s", bpDir))
 	cmd.Dir = filepath.Join(bpDir, "src", languageName)
-
 	if err := cmd.Run(); err != nil {
-		fmt.Printf("GOPATH=%s\n", canonicalBpDir)
+		fmt.Printf("GOPATH=%s\n", bpDir)
 		return fmt.Errorf("dep ensure: %s", err)
 	}
 	return nil

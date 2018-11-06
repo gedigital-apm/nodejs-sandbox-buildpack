@@ -29,7 +29,7 @@ var _ = Describe("CF NodeJS Buildpack", func() {
 			It("resolves to a nodeJS version successfully", func() {
 				PushAppAndConfirm(app)
 
-				Eventually(app.Stdout.String).Should(MatchRegexp("Installing node 6\\.\\d+\\.\\d+"))
+				Eventually(app.Stdout.String).Should(MatchRegexp("Installing node 4\\.\\d+\\.\\d+"))
 				Expect(app.GetBody("/")).To(ContainSubstring("Hello, World!"))
 			})
 		})
@@ -109,8 +109,7 @@ var _ = Describe("CF NodeJS Buildpack", func() {
 
 		It("is running with autosized max_old_space_size", func() {
 			PushAppAndConfirm(app)
-
-			Expect(app.GetBody("/")).To(ContainSubstring("NodeOptions: --max_old_space_size=96"))
+			Expect(app.GetBody("/")).To(ContainSubstring("MaxOldSpace: 96")) // 128 * 75%
 		})
 	})
 
@@ -119,10 +118,9 @@ var _ = Describe("CF NodeJS Buildpack", func() {
 			app = cutlass.New(filepath.Join(bpDir, "fixtures", "simple_app"))
 		})
 
-		It("is not running with autosized max_old_space_size", func() {
+		It("is running with autosized max_old_space_size", func() {
 			PushAppAndConfirm(app)
-
-			Expect(app.GetBody("/")).To(ContainSubstring("NodeOptions: undefined"))
+			Expect(app.GetBody("/")).To(ContainSubstring("MaxOldSpace: undefined"))
 		})
 	})
 

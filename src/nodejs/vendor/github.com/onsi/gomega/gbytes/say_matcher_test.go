@@ -43,11 +43,6 @@ var _ = Describe("SayMatcher", func() {
 			Expect(buffer).Should(Say("a%sc", "b"))
 		})
 
-		It("should match literal %", func() {
-			buffer.Write([]byte("%"))
-			Expect(buffer).Should(Say("abc%"))
-		})
-
 		It("should use a regular expression", func() {
 			Expect(buffer).Should(Say("a.c"))
 		})

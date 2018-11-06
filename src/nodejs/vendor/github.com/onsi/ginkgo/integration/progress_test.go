@@ -15,7 +15,7 @@ var _ = Describe("Emitting progress", func() {
 	BeforeEach(func() {
 		args = []string{"--noColor"}
 		pathToTest = tmpPath("progress")
-		copyIn(fixturePath("progress_fixture"), pathToTest, false)
+		copyIn("progress_fixture", pathToTest)
 	})
 
 	JustBeforeEach(func() {

@@ -26,7 +26,6 @@ var _ = Describe("Scaffold", func() {
 
 	BeforeEach(func() {
 		var err error
-		fmt.Print("\n\n **Remember**: If you have changed files in scaffold directory, be sure to run go generate.\n\n")
 		buildpackDir = "./fixtures/good"
 		cacheDir, err = ioutil.TempDir("", "packager-cachedir")
 		Expect(err).To(BeNil())
@@ -121,6 +120,8 @@ var _ = Describe("Scaffold", func() {
 			Expect(err).To(BeNil())
 
 			Expect(libbuildpack.CopyDirectory("fixtures/modified", baseDir)).To(Succeed())
+
+			// run the code under test
 		})
 		AfterEach(func() {
 			os.RemoveAll(baseDir)

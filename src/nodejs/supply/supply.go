@@ -3,10 +3,10 @@ package supply
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
-	"nodejs/package_json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,9 +22,6 @@ type Command interface {
 type Manifest interface {
 	AllDependencyVersions(string) []string
 	DefaultVersion(string) (libbuildpack.Dependency, error)
-}
-
-type Installer interface {
 	InstallDependency(libbuildpack.Dependency, string) error
 	InstallOnlyVersion(string, string) error
 }
@@ -52,7 +49,6 @@ type Stager interface {
 type Supplier struct {
 	Stager             Stager
 	Manifest           Manifest
-	Installer          Installer
 	Log                *libbuildpack.Logger
 	Logfile            *os.File
 	Command            Command
@@ -64,10 +60,20 @@ type Supplier struct {
 	HasDevDependencies bool
 	PostBuild          string
 	UseYarn            bool
-	UsesYarnWorkspaces bool
 	IsVendored         bool
 	Yarn               Yarn
 	NPM                NPM
+}
+
+type packageJSON struct {
+	Engines engines `json:"engines"`
+}
+
+type engines struct {
+	Node string `json:"node"`
+	Yarn string `json:"yarn"`
+	NPM  string `json:"npm"`
+	Iojs string `json:"iojs"`
 }
 
 func Run(s *Supplier) error {
@@ -133,11 +139,9 @@ func Run(s *Supplier) error {
 			return err
 		}
 
-		if !s.UseYarn || !s.UsesYarnWorkspaces {
-			if err := s.MoveDependencyArtifacts(); err != nil {
-				s.Log.Error("Unable to move dependencies: %s", err.Error())
-				return err
-			}
+		if err := s.MoveDependencyArtifacts(); err != nil {
+			s.Log.Error("Unable to move dependencies: %s", err.Error())
+			return err
 		}
 
 		s.ListDependencies()
@@ -287,7 +291,6 @@ func (s *Supplier) ReadPackageJSON() error {
 			StartScript string `json:"start"`
 		} `json:"scripts"`
 		DevDependencies map[string]string `json:"devDependencies"`
-		Workspaces      []string          `json:"workspaces"`
 	}
 
 	if s.UseYarn, err = libbuildpack.FileExists(filepath.Join(s.Stager.BuildDir(), "yarn.lock")); err != nil {
@@ -307,7 +310,6 @@ func (s *Supplier) ReadPackageJSON() error {
 		}
 	}
 
-	s.UsesYarnWorkspaces = (len(p.Workspaces) > 0)
 	s.HasDevDependencies = (len(p.DevDependencies) > 0)
 	s.PreBuild = p.Scripts.PreBuild
 	s.PostBuild = p.Scripts.PostBuild
@@ -426,9 +428,27 @@ func fileHasString(file string, patterns ...string) (bool, error) {
 }
 
 func (s *Supplier) LoadPackageJSON() error {
-	p, err := package_json.LoadPackageJSON(filepath.Join(s.Stager.BuildDir(), "package.json"), s.Log)
-	if err != nil {
+	var p packageJSON
+
+	err := libbuildpack.NewJSON().Load(filepath.Join(s.Stager.BuildDir(), "package.json"), &p)
+	if err != nil && !os.IsNotExist(err) {
 		return err
+	}
+
+	if p.Engines.Iojs != "" {
+		return errors.New("io.js not supported by this buildpack")
+	}
+
+	if p.Engines.Node != "" {
+		s.Log.Info("engines.node (package.json): %s", p.Engines.Node)
+	} else {
+		s.Log.Info("engines.node (package.json): unspecified")
+	}
+
+	if p.Engines.NPM != "" {
+		s.Log.Info("engines.npm (package.json): %s", p.Engines.NPM)
+	} else {
+		s.Log.Info("engines.npm (package.json): unspecified (use default)")
 	}
 
 	s.NodeVersion = p.Engines.Node
@@ -475,7 +495,7 @@ func (s *Supplier) InstallNode(tempDir string) error {
 		}
 	}
 
-	if err := s.Installer.InstallDependency(dep, tempDir); err != nil {
+	if err := s.Manifest.InstallDependency(dep, tempDir); err != nil {
 		return err
 	}
 
@@ -529,7 +549,7 @@ func (s *Supplier) InstallYarn() error {
 
 	yarnInstallDir := filepath.Join(s.Stager.DepDir(), "yarn")
 
-	if err := s.Installer.InstallOnlyVersion("yarn", yarnInstallDir); err != nil {
+	if err := s.Manifest.InstallOnlyVersion("yarn", yarnInstallDir); err != nil {
 		return err
 	}
 
@@ -581,23 +601,19 @@ func (s *Supplier) CreateDefaultEnv() error {
 		return err
 	}
 
-	scriptContents := `export NODE_HOME=%[1]s
+	scriptContents := `export NODE_HOME=%s
 export NODE_ENV=${NODE_ENV:-production}
 export MEMORY_AVAILABLE=$(echo $VCAP_APPLICATION | jq '.limits.mem')
 export WEB_MEMORY=${WEB_MEMORY:-512}
 export WEB_CONCURRENCY=${WEB_CONCURRENCY:-1}
 if [ ! -d "$HOME/node_modules" ]; then
-	export NODE_PATH=${NODE_PATH:-"%[2]s"}
-	ln -s "%[2]s" "$HOME/node_modules"
+	export NODE_PATH=${NODE_PATH:-%s}
+	export PATH=$PATH:$HOME/bin:$NODE_PATH/.bin
 else
-	export NODE_PATH=${NODE_PATH:-"$HOME/node_modules"}
+	export PATH=$PATH:$HOME/bin:$HOME/node_modules/.bin
 fi
-export PATH=$PATH:"$HOME/bin":$NODE_PATH/.bin
 `
-	return s.Stager.WriteProfileD("node.sh",
-		fmt.Sprintf(scriptContents,
-			filepath.Join("$DEPS_DIR", s.Stager.DepsIdx(), "node"),
-			filepath.Join("$DEPS_DIR", s.Stager.DepsIdx(), "node_modules")))
+	return s.Stager.WriteProfileD("node.sh", fmt.Sprintf(scriptContents, filepath.Join("$DEPS_DIR", s.Stager.DepsIdx(), "node"), filepath.Join("$DEPS_DIR", s.Stager.DepsIdx(), "node_modules")))
 }
 
 func copyAll(srcDir, destDir string, files []string) error {

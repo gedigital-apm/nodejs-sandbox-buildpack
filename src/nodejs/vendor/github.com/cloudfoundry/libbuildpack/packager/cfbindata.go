@@ -52,9 +52,6 @@ func OurRestoreAsset(dir, name string, funcMap template.FuncMap, shas map[string
 		}
 		name = strings.Replace(name, "src/LANGUAGE/", fmt.Sprintf("src/%s/", langName()), 1)
 	}
-	if basename := filepath.Base(name); strings.HasPrefix(basename, "_") {
-		name = filepath.Join(filepath.Dir(name), string([]rune(basename)[1:]))
-	}
 
 	oldSha256 := ""
 	if oldContents, err := ioutil.ReadFile(_filePath(dir, name)); err == nil {
@@ -65,7 +62,7 @@ func OurRestoreAsset(dir, name string, funcMap template.FuncMap, shas map[string
 		fmt.Println(name, oldSha256, shas[name])
 	}
 	if !force && shas[name] != "" && shas[name] != oldSha256 {
-		fmt.Fprintf(Stdout, "***Ignoring %s because it has been modified***\n", name)
+		fmt.Fprintf(Stdout, "***Ignoring %s becuase it has been modified***\n", name)
 		return nil
 	}
 	shas[name] = checksumHex(b.Bytes())
