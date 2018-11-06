@@ -63,43 +63,6 @@ func TestMockTransport(t *testing.T) {
 	}
 }
 
-// We should be able to find GET handlers when using an http.Request with a
-// default (zero-value) .Method.
-func TestMockTransportDefaultMethod(t *testing.T) {
-	Activate()
-	defer Deactivate()
-
-	urlString := "https://github.com/"
-	url, err := url.Parse(urlString)
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := "hello world"
-
-	RegisterResponder("GET", urlString, NewStringResponder(200, body))
-
-	req := &http.Request {
-		URL: url,
-		// Note: Method unspecified (zero-value)
-	}
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-
-	data, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if string(data) != body {
-		t.FailNow()
-	}
-}
-
 func TestMockTransportReset(t *testing.T) {
 	DeactivateAndReset()
 
@@ -158,70 +121,19 @@ func TestMockTransportQuerystringFallback(t *testing.T) {
 	// register the testUrl responder
 	RegisterResponder("GET", testUrl, NewStringResponder(200, "hello world"))
 
-	for _, suffix := range []string{"?", "?hello=world", "?hello=world#foo", "#foo"} {
-		reqURL := testUrl + suffix
-
-		// make a request for the testUrl with a querystring
-		resp, err := http.Get(reqURL)
-		if err != nil {
-			t.Fatalf("expected request %s to succeed", reqURL)
-		}
-
-		data, err := ioutil.ReadAll(resp.Body)
-		if err != nil {
-			t.Fatalf("%s error: %s", reqURL, err)
-		}
-
-		if string(data) != "hello world" {
-			t.Fatalf("expected body of %s to be 'hello world'", reqURL)
-		}
+	// make a request for the testUrl with a querystring
+	resp, err := http.Get(testUrl + "?hello=world")
+	if err != nil {
+		t.Fatal("expected request to succeed")
 	}
-}
 
-func TestMockTransportPathOnlyFallback(t *testing.T) {
-	// Just in case a panic occurs
-	defer DeactivateAndReset()
+	data, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	for responder, paths := range map[string][]string{
-		"/hello/world?query=string#fragment": {
-			testUrl + "hello/world?query=string#fragment",
-		},
-		"/hello/world?query=string": {
-			testUrl + "hello/world?query=string",
-		},
-		"/hello/world#fragment": {
-			testUrl + "hello/world#fragment",
-		},
-		"/hello/world": {
-			testUrl + "hello/world?query=string#fragment",
-			testUrl + "hello/world?query=string",
-			testUrl + "hello/world#fragment",
-			testUrl + "hello/world",
-		},
-	} {
-		Activate()
-
-		// register the responder
-		RegisterResponder("GET", responder, NewStringResponder(200, "hello world"))
-
-		for _, reqURL := range paths {
-			// make a request for the testUrl with a querystring
-			resp, err := http.Get(reqURL)
-			if err != nil {
-				t.Fatalf("%s: expected request %s to succeed", responder, reqURL)
-			}
-
-			data, err := ioutil.ReadAll(resp.Body)
-			if err != nil {
-				t.Fatalf("%s: %s error: %s", responder, reqURL, err)
-			}
-
-			if string(data) != "hello world" {
-				t.Fatalf("%s: expected body of %s to be 'hello world'", responder, reqURL)
-			}
-		}
-
-		DeactivateAndReset()
+	if string(data) != "hello world" {
+		t.Fatal("expected body to be 'hello world'")
 	}
 }
 

@@ -1,6 +1,8 @@
 package integration_test
 
 import (
+	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -11,39 +13,44 @@ import (
 )
 
 var _ = Describe("CF NodeJS Buildpack", func() {
-	var (
-		app, serviceBrokerApp         *cutlass.App
-		serviceBrokerURL, serviceName, serviceOffering string
-	)
-
-	BeforeEach(func() {
-		serviceName = "newrelic-" + cutlass.RandStringRunes(10)
-		serviceOffering = "newrelic-" + cutlass.RandStringRunes(10)
-	})
+	var app, sbApp *cutlass.App
+	var sbUrl string
+	RunCf := func(args ...string) {
+		command := exec.Command("cf", args...)
+		command.Stdout = GinkgoWriter
+		command.Stderr = GinkgoWriter
+		Expect(command.Run()).To(Succeed())
+	}
 
 	AfterEach(func() {
 		app = DestroyApp(app)
 
-		RunCF("purge-service-offering", "-f", serviceOffering)
-		RunCF("delete-service-broker", "-f", serviceOffering)
-		RunCF("delete-service", "-f", serviceName)
+		command := exec.Command("cf", "purge-service-offering", "-f", "newrelic")
+		command.Stdout = GinkgoWriter
+		command.Stderr = GinkgoWriter
+		_ = command.Run()
 
-		serviceBrokerApp = DestroyApp(serviceBrokerApp)
+		command = exec.Command("cf", "delete-service-broker", "-f", "newrelic")
+		command.Stdout = GinkgoWriter
+		command.Stderr = GinkgoWriter
+		_ = command.Run()
+
+		sbApp = DestroyApp(sbApp)
 	})
 
 	It("deploying a NodeJS app with NewRelic", func() {
 		By("set up a service broker", func() {
-			serviceBrokerApp = cutlass.New(filepath.Join(bpDir, "fixtures", "fake_newrelic_service_broker"))
-			serviceBrokerApp.SetEnv("OFFERING_NAME", serviceOffering)
-			Expect(serviceBrokerApp.Push()).To(Succeed())
-			Eventually(func() ([]string, error) { return serviceBrokerApp.InstanceStates() }, 20*time.Second).Should(Equal([]string{"RUNNING"}))
+			sbApp = cutlass.New(filepath.Join(bpDir, "fixtures", "fake_newrelic_service_broker"))
+			Expect(sbApp.Push()).To(Succeed())
+			Eventually(func() ([]string, error) { return sbApp.InstanceStates() }, 20*time.Second).Should(Equal([]string{"RUNNING"}))
 
 			var err error
-			serviceBrokerURL, err = serviceBrokerApp.GetUrl("")
+			sbUrl, err = sbApp.GetUrl("")
 			Expect(err).ToNot(HaveOccurred())
 		})
 
 		app = cutlass.New(filepath.Join(bpDir, "fixtures", "with_newrelic"))
+		Expect(os.Rename(filepath.Join(app.Path, "manifest.yml"), filepath.Join(app.Path, "manifest.orig.yml"))).To(Succeed())
 
 		By("Pushing a newrelic app without a service", func() {
 			PushAppAndConfirm(app)
@@ -53,12 +60,13 @@ var _ = Describe("CF NodeJS Buildpack", func() {
 			Expect(app.Stdout.String()).ToNot(ContainSubstring("&license_key=fake_new_relic_key3"))
 		})
 
+		Expect(os.Rename(filepath.Join(app.Path, "manifest.orig.yml"), filepath.Join(app.Path, "manifest.yml"))).To(Succeed())
+
 		By("Pushing an app with a user provided service", func() {
-			RunCF("create-user-provided-service", serviceName, "-p", `{"licenseKey": "fake_new_relic_key3"}`)
+			RunCf("create-user-provided-service", "newrelic", "-p", `{"licenseKey": "fake_new_relic_key3"}`)
 
 			app.Stdout.Reset()
-			RunCF("bind-service", app.Name, serviceName)
-			Expect(app.Restart()).To(Succeed())
+			PushAppAndConfirm(app)
 
 			Eventually(app.Stdout.String).Should(ContainSubstring("&license_key=fake_new_relic_key3"))
 			Expect(app.Stdout.String()).ToNot(ContainSubstring("&license_key=fake_new_relic_key1"))
@@ -66,18 +74,16 @@ var _ = Describe("CF NodeJS Buildpack", func() {
 		})
 
 		By("Unbinding and deleting the CUPS newrelic service", func() {
-			RunCF("unbind-service", app.Name, serviceName)
-			RunCF("delete-service", "-f", serviceName)
+			RunCf("unbind-service", app.Name, "newrelic")
+			RunCf("delete-service", "-f", "newrelic")
 		})
 
 		By("Pushing an app with a marketplace provided service", func() {
-			serviceFromBroker := "newrelic-sb-" + cutlass.RandStringRunes(10)
-			RunCF("create-service-broker", serviceBrokerApp.Name, "username", "password", serviceBrokerURL, "--space-scoped")
-			RunCF("create-service", serviceOffering, "public", serviceFromBroker)
+			RunCf("create-service-broker", "newrelic", "username", "password", sbUrl, "--space-scoped")
+			RunCf("create-service", "newrelic", "public", "newrelic")
 
 			app.Stdout.Reset()
-			RunCF("bind-service", app.Name, serviceFromBroker)
-			Expect(app.Restart()).To(Succeed())
+			PushAppAndConfirm(app)
 
 			Eventually(app.Stdout.String).Should(ContainSubstring("&license_key=fake_new_relic_key2"))
 			Expect(app.Stdout.String()).ToNot(ContainSubstring("&license_key=fake_new_relic_key1"))

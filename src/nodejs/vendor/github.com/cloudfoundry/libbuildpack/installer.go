@@ -34,8 +34,6 @@ func (i *Installer) InstallDependency(dep Dependency, outputDir string) error {
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(tmpDir)
-
 	tmpFile := filepath.Join(tmpDir, "archive")
 
 	entry, err := i.manifest.GetEntry(dep)

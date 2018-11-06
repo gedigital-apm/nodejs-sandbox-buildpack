@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/blang/semver"
 	"github.com/tidwall/gjson"
 )
 
@@ -56,7 +55,7 @@ func New(fixture string) *App {
 	return &App{
 		Name:         filepath.Base(fixture) + "-" + RandStringRunes(20),
 		Path:         fixture,
-		Stack:        os.Getenv("CF_STACK"),
+		Stack:        "",
 		Buildpacks:   []string{},
 		Memory:       DefaultMemory,
 		Disk:         DefaultDisk,
@@ -81,22 +80,6 @@ func ApiVersion() (string, error) {
 		return "", err
 	}
 	return info.ApiVersion, nil
-}
-
-func ApiGreaterThan(version string) (bool, error) {
-	apiVersionString, err := ApiVersion()
-	if err != nil {
-		return false, err
-	}
-	apiVersion, err := semver.Make(apiVersionString)
-	if err != nil {
-		return false, err
-	}
-	reqVersion, err := semver.ParseRange(">= " + version)
-	if err != nil {
-		return false, err
-	}
-	return reqVersion(apiVersion), nil
 }
 
 func Stacks() ([]string, error) {
@@ -142,42 +125,26 @@ func DeleteBuildpack(language string) error {
 	return nil
 }
 
-func UpdateBuildpack(language, file, stack string) error {
-	command := exec.Command("cf", "update-buildpack", fmt.Sprintf("%s_buildpack", language), "-p", file, "--enable", "-s", stack)
+func UpdateBuildpack(language, file string) error {
+	command := exec.Command("cf", "update-buildpack", fmt.Sprintf("%s_buildpack", language), "-p", file, "--enable")
 	if data, err := command.CombinedOutput(); err != nil {
-		return fmt.Errorf("Failed to update buildpack by running '%s':\n%s\n%v", strings.Join(command.Args, " "), string(data), err)
+		fmt.Println(string(data))
+		return err
 	}
 	return nil
 }
 
 func createBuildpack(language, file string) error {
 	command := exec.Command("cf", "create-buildpack", fmt.Sprintf("%s_buildpack", language), file, "100", "--enable")
-	if data, err := command.CombinedOutput(); err != nil {
-		return fmt.Errorf("Failed to create buildpack by running '%s':\n%s\n%v", strings.Join(command.Args, " "), string(data), err)
+	if _, err := command.CombinedOutput(); err != nil {
+		return err
 	}
 	return nil
 }
 
-func CountBuildpack(language string) (int, error) {
-	command := exec.Command("cf", "buildpacks")
-	targetBpname := fmt.Sprintf("%s_buildpack", language)
-	matches := 0
-	lines, err := command.CombinedOutput()
-	if err != nil {
-		return -1, err
-	}
-	for _, line := range strings.Split(string(lines), "\n") {
-		bpname := strings.SplitN(line, " ", 2)[0]
-		if bpname == targetBpname {
-			matches++
-		}
-	}
-	return matches, nil
-}
-
-func CreateOrUpdateBuildpack(language, file, stack string) error {
+func CreateOrUpdateBuildpack(language, file string) error {
 	createBuildpack(language, file)
-	return UpdateBuildpack(language, file, stack)
+	return UpdateBuildpack(language, file)
 }
 
 func (a *App) ConfirmBuildpack(version string) error {
@@ -201,16 +168,6 @@ func (a *App) RunTask(command string) ([]byte, error) {
 		return bytes, err
 	}
 	return bytes, nil
-}
-
-func (a *App) Stop() error {
-	command := exec.Command("cf", "stop", a.Name)
-	command.Stdout = DefaultStdoutStderr
-	command.Stderr = DefaultStdoutStderr
-	if err := command.Run(); err != nil {
-		return err
-	}
-	return nil
 }
 
 func (a *App) Restart() error {
@@ -295,8 +252,8 @@ func (a *App) PushNoStart() error {
 	if a.Stack != "" {
 		args = append(args, "-s", a.Stack)
 	}
-	for _, buildpack := range a.Buildpacks {
-		args = append(args, "-b", buildpack)
+	if len(a.Buildpacks) == 1 {
+		args = append(args, "-b", a.Buildpacks[len(a.Buildpacks)-1])
 	}
 	if _, err := os.Stat(filepath.Join(a.Path, "manifest.yml")); err == nil {
 		args = append(args, "-f", filepath.Join(a.Path, "manifest.yml"))
@@ -306,6 +263,9 @@ func (a *App) PushNoStart() error {
 	}
 	if a.Disk != "" {
 		args = append(args, "-k", a.Disk)
+	}
+	if a.StartCommand != "" {
+		args = append(args, "-c", a.StartCommand)
 	}
 	if a.StartCommand != "" {
 		args = append(args, "-c", a.StartCommand)
@@ -339,32 +299,21 @@ func (a *App) PushNoStart() error {
 	return nil
 }
 
-func (a *App) V3Push() error {
-	if err := a.PushNoStart(); err != nil {
-		return err
-	}
-
-	args := []string{"v3-push", a.Name, "-p", a.Path}
-	if len(a.Buildpacks) > 1 {
-		for _, buildpack := range a.Buildpacks {
-			args = append(args, "-b", buildpack)
-		}
-	}
-	command := exec.Command("cf", args...)
-	command.Stdout = DefaultStdoutStderr
-	command.Stderr = DefaultStdoutStderr
-	if err := command.Run(); err != nil {
-		return err
-	}
-	return nil
-}
-
 func (a *App) Push() error {
 	if err := a.PushNoStart(); err != nil {
 		return err
 	}
 
-	command := exec.Command("cf", "start", a.Name)
+	var args []string
+	if len(a.Buildpacks) > 1 {
+		args = []string{"v3-push", a.Name, "-p", a.Path}
+		for _, buildpack := range a.Buildpacks {
+			args = append(args, "-b", buildpack)
+		}
+	} else {
+		args = []string{"start", a.Name}
+	}
+	command := exec.Command("cf", args...)
 	command.Stdout = DefaultStdoutStderr
 	command.Stderr = DefaultStdoutStderr
 	if err := command.Run(); err != nil {

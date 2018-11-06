@@ -1,6 +1,7 @@
 package integration_test
 
 import (
+	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -11,49 +12,59 @@ import (
 )
 
 var _ = Describe("CF NodeJS Buildpack", func() {
-
-	var (
-		app, serviceBrokerApp *cutlass.App
-		serviceBrokerURL      string
-		serviceOffering = "snyk" + cutlass.RandStringRunes(10)
-	)
+	var app, sbApp *cutlass.App
+	var sbUrl string
+	RunCf := func(args ...string) error {
+		command := exec.Command("cf", args...)
+		command.Stdout = GinkgoWriter
+		command.Stderr = GinkgoWriter
+		return command.Run()
+	}
 
 	AfterEach(func() {
 		app = DestroyApp(app)
 
-		RunCF("purge-service-offering", "-f", serviceOffering)
-		RunCF("delete-service-broker", "-f", serviceOffering)
+		command := exec.Command("cf", "purge-service-offering", "-f", "snyk")
+		command.Stdout = GinkgoWriter
+		command.Stderr = GinkgoWriter
+		_ = command.Run()
 
-		serviceBrokerApp = DestroyApp(serviceBrokerApp)
+		command = exec.Command("cf", "delete-service-broker", "-f", "snyk")
+		command.Stdout = GinkgoWriter
+		command.Stderr = GinkgoWriter
+		_ = command.Run()
+
+		sbApp = DestroyApp(sbApp)
 	})
 
-	It("bind NodeJS app with snyk service", func() {
-		By("set up a service broker", func() {
-			serviceBrokerApp = cutlass.New(filepath.Join(bpDir, "fixtures", "fake_snyk_service_broker"))
-			serviceBrokerApp.SetEnv("OFFERING_NAME", serviceOffering)
-			Expect(serviceBrokerApp.Push()).To(Succeed())
-			Eventually(func() ([]string, error) { return serviceBrokerApp.InstanceStates() }, 20*time.Second).Should(Equal([]string{"RUNNING"}))
+	BeforeEach(func() {
+		sbApp = cutlass.New(filepath.Join(bpDir, "fixtures", "fake_snyk_service_broker"))
+		Expect(sbApp.Push()).To(Succeed())
+		Eventually(func() ([]string, error) { return sbApp.InstanceStates() }, 20*time.Second).Should(Equal([]string{"RUNNING"}))
 
-			var err error
-			serviceBrokerURL, err = serviceBrokerApp.GetUrl("")
-			Expect(err).ToNot(HaveOccurred())
-		})
+		var err error
+		sbUrl, err = sbApp.GetUrl("")
+		Expect(err).ToNot(HaveOccurred())
 
-		By("Pushing an app with a marketplace provided service", func() {
-			serviceFromBroker := "snyk-sb-" + cutlass.RandStringRunes(10)
-			RunCF("create-service-broker", serviceBrokerApp.Name, "username", "password", serviceBrokerURL, "--space-scoped")
-			RunCF("create-service", serviceOffering, "public", serviceFromBroker)
+		RunCf("create-service-broker", "snyk", "username", "password", sbUrl, "--space-scoped")
+		RunCf("create-service", "snyk", "public", "snyk")
 
-			app = cutlass.New(filepath.Join(bpDir, "fixtures", "with_snyk"))
-			app.SetEnv("BP_DEBUG", "true")
-			Expect(app.PushNoStart()).To(Succeed())
+		app = cutlass.New(filepath.Join(bpDir, "fixtures", "with_snyk"))
+		app.SetEnv("BP_DEBUG", "true")
+		PushAppAndConfirm(app)
+	})
+
+	Context("bind NodeJS app with snyk service", func() {
+		BeforeEach(func() {
+			RunCf("bind-service", app.Name, "snyk")
 
 			app.Stdout.Reset()
-			RunCF("bind-service", app.Name, serviceFromBroker)
-			app.Restart()
+			RunCf("restage", app.Name)
+		})
 
-			Eventually(app.Stdout.String()).Should(ContainSubstring("Snyk token was found"))
-			Eventually(app.Stdout.String()).ShouldNot(ContainSubstring("Missing node_modules folder: we can't test without dependencies"))
+		It("test if Snyk token was found", func() {
+			Expect(app.ConfirmBuildpack(buildpackVersion)).To(Succeed())
+			Expect(app.Stdout.String()).To(ContainSubstring("Snyk token was found"))
 		})
 	})
 })

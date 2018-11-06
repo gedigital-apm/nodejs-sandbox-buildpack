@@ -31,29 +31,15 @@ var _ = Describe("JSON", func() {
 
 	Describe("Load", func() {
 		Context("file is valid json", func() {
-			Context("that starts with BOM", func() {
-				BeforeEach(func() {
-					ioutil.WriteFile(filepath.Join(tmpDir, "valid.json"), []byte("\uFEFF"+`{"key": "value"}`), 0666)
-				})
-				It("returns an error", func() {
-					obj := make(map[string]string)
-					err = json.Load(filepath.Join(tmpDir, "valid.json"), &obj)
-
-					Expect(err).To(BeNil())
-					Expect(obj["key"]).To(Equal("value"))
-				})
+			BeforeEach(func() {
+				ioutil.WriteFile(filepath.Join(tmpDir, "valid.json"), []byte(`{"key": "value"}`), 0666)
 			})
-			Context("that does not start with BOM", func() {
-				BeforeEach(func() {
-					ioutil.WriteFile(filepath.Join(tmpDir, "valid.json"), []byte(`{"key": "value"}`), 0666)
-				})
-				It("returns an error", func() {
-					obj := make(map[string]string)
-					err = json.Load(filepath.Join(tmpDir, "valid.json"), &obj)
+			It("returns an error", func() {
+				obj := make(map[string]string)
+				err = json.Load(filepath.Join(tmpDir, "valid.json"), &obj)
 
-					Expect(err).To(BeNil())
-					Expect(obj["key"]).To(Equal("value"))
-				})
+				Expect(err).To(BeNil())
+				Expect(obj["key"]).To(Equal("value"))
 			})
 		})
 
