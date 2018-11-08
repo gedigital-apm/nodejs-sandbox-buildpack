@@ -1,5 +1,7 @@
 FILTER="appdynamics\|app-dynamics"
 
+echo $VCAP_SERVICES
+
 if [ `echo $VCAP_SERVICES | grep -c $FILTER ` -gt 0 ];
 then
   key="appdynamics"
