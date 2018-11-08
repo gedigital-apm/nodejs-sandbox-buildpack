@@ -6,7 +6,7 @@ if [ `echo $VCAP_SERVICES | grep -c $FILTER ` -gt 0 ];
 then
   key="appdynamics"
   APPDYNAMICS_CONTROLLER_HOST_NAME=$(echo "${VCAP_SERVICES-}" | jq -r '.["user-provided"][] | select(.name=='\""$key"\"') | .credentials | .["host-name"] ')
-  APPDYNAMICS_CONTROLLER_PORT=$(echo "${VCAP_SERVICES-}" | jq -r '.['\""$key"\"'][0] | .credentials | .port ')
+  APPDYNAMICS_CONTROLLER_PORT=$(echo "${VCAP_SERVICES-}" | jq -r '.["user-provided"][] | select(.name=='\""$key"\"') | .credentials | .["port"] ')
   APPDYNAMICS_AGENT_ACCOUNT_NAME=$(echo "${VCAP_SERVICES-}" | jq -r '.["user-provided"][] | select(.name=='\""$key"\"') | .credentials | .["account-name"] ')
 
   APPDYNAMICS_CONTROLLER_SSL_ENABLED=$(echo "${VCAP_SERVICES-}" | jq -r '.["user-provided"][] | select(.name=='\""$key"\"') | .credentials | .["ssl-enabled"] ')
