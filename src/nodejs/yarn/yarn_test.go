@@ -2,6 +2,7 @@ package yarn_test
 
 import (
 	"bytes"
+	"io"
 	"io/ioutil"
 	"nodejs/yarn"
 	"os"
@@ -21,7 +22,6 @@ var _ = Describe("Yarn", func() {
 	var (
 		err         error
 		buildDir    string
-		cacheDir    string
 		y           *yarn.Yarn
 		logger      *libbuildpack.Logger
 		buffer      *bytes.Buffer
@@ -32,7 +32,6 @@ var _ = Describe("Yarn", func() {
 
 	BeforeEach(func() {
 		buildDir, err = ioutil.TempDir("", "nodejs-buildpack.build.")
-		cacheDir, err = ioutil.TempDir("", "nodejs-buildpack.cache.")
 		Expect(err).To(BeNil())
 
 		buffer = new(bytes.Buffer)
@@ -43,8 +42,9 @@ var _ = Describe("Yarn", func() {
 		mockCommand = NewMockCommand(mockCtrl)
 
 		y = &yarn.Yarn{
-			Log:     logger,
-			Command: mockCommand,
+			BuildDir: buildDir,
+			Log:      logger,
+			Command:  mockCommand,
 		}
 	})
 
@@ -57,56 +57,43 @@ var _ = Describe("Yarn", func() {
 
 	Describe("Build", func() {
 		var oldNodeHome string
-		var yarnConfig map[string]string
-		var yarnInstallArgs []string
 
-		AfterEach(func() {
-			Expect(os.Setenv("NODE_HOME", oldNodeHome)).To(Succeed())
-		})
 		BeforeEach(func() {
 			oldNodeHome = os.Getenv("NODE_HOME")
 			Expect(os.Setenv("NODE_HOME", "test_node_home")).To(Succeed())
+		})
 
-			yarnConfig = map[string]string{}
-			mockCommand.EXPECT().Run(gomock.Any()).Do(func(cmd *exec.Cmd) error {
-				switch cmd.Args[1] {
-				case "config":
-					Expect(cmd.Args[0:3]).To(Equal([]string{"yarn", "config", "set"}))
-					yarnConfig[cmd.Args[3]] = cmd.Args[4]
-				default:
-					yarnInstallArgs = cmd.Args
-					Expect(cmd.Env).To(ContainElement("npm_config_nodedir=test_node_home"))
-				}
-				Expect(cmd.Dir).To(Equal(buildDir))
-				return nil
-			}).AnyTimes()
+		AfterEach(func() {
+			Expect(os.Setenv("NODE_HOME", oldNodeHome)).To(Succeed())
 		})
 
 		Context("has npm-packages-offline-cache", func() {
 			JustBeforeEach(func() {
 				Expect(os.MkdirAll(filepath.Join(buildDir, "npm-packages-offline-cache"), 0755)).To(Succeed())
 
-				mockCommand.EXPECT().Execute(buildDir, ioutil.Discard, gomock.Any(), "yarn", []string{"check", "--offline"}).Return(yarnCheck)
+				gomock.InOrder(
+					mockCommand.EXPECT().Execute(buildDir, gomock.Any(), gomock.Any(), "yarn", "config", "set", "yarn-offline-mirror", filepath.Join(buildDir, "npm-packages-offline-cache")).Return(nil),
+					mockCommand.EXPECT().Execute(buildDir, gomock.Any(), gomock.Any(), "yarn", "install", "--pure-lockfile", "--ignore-engines", "--cache-folder", filepath.Join(buildDir, ".cache/yarn"), "--offline").Do(
+						func(_ string, _, _ io.Writer, _, _, _, _, _, _, _ string) {
+							Expect(os.Getenv("npm_config_nodedir")).To(Equal("test_node_home"))
+						}).Return(nil),
+					mockCommand.EXPECT().Execute(buildDir, ioutil.Discard, gomock.Any(), "yarn", "check", "--offline").Return(yarnCheck),
+				)
 			})
 
 			It("tells the user it is running in offline mode", func() {
-				Expect(y.Build(buildDir, cacheDir)).To(Succeed())
+				Expect(y.Build()).To(Succeed())
 				Expect(buffer.String()).To(ContainSubstring("Installing node modules (yarn.lock)"))
 				Expect(buffer.String()).To(ContainSubstring("Found yarn mirror directory " + filepath.Join(buildDir, "npm-packages-offline-cache")))
 				Expect(buffer.String()).To(ContainSubstring("Running yarn in offline mode"))
 			})
 
 			It("runs yarn config", func() {
-				Expect(y.Build(buildDir, cacheDir)).To(Succeed())
-				Expect(yarnConfig).To(Equal(map[string]string{
-					"yarn-offline-mirror":         filepath.Join(buildDir, "npm-packages-offline-cache"),
-					"yarn-offline-mirror-pruning": "false",
-				}))
+				Expect(y.Build()).To(Succeed())
 			})
 
-			It("runs yarn install with offline arguments and npm_config_nodedir", func() {
-				Expect(y.Build(buildDir, cacheDir)).To(Succeed())
-				Expect(yarnInstallArgs).To(Equal([]string{"yarn", "install", "--pure-lockfile", "--ignore-engines", "--cache-folder", filepath.Join(cacheDir, ".cache/yarn"), "--modules-folder", filepath.Join(buildDir, "node_modules"), "--offline"}))
+			It("runs yarn install with npm_config_nodedir", func() {
+				Expect(y.Build()).To(Succeed())
 			})
 
 			Context("package.json matches yarn.lock", func() {
@@ -115,7 +102,7 @@ var _ = Describe("Yarn", func() {
 				})
 
 				It("reports the fact", func() {
-					Expect(y.Build(buildDir, cacheDir)).To(Succeed())
+					Expect(y.Build()).To(Succeed())
 					Expect(buffer.String()).To(ContainSubstring("yarn.lock and package.json match"))
 				})
 			})
@@ -126,7 +113,7 @@ var _ = Describe("Yarn", func() {
 				})
 
 				It("warns the user", func() {
-					Expect(y.Build(buildDir, cacheDir)).To(Succeed())
+					Expect(y.Build()).To(Succeed())
 					Expect(buffer.String()).To(ContainSubstring("**WARNING** yarn.lock is outdated"))
 				})
 			})
@@ -134,27 +121,24 @@ var _ = Describe("Yarn", func() {
 
 		Context("NO npm-packages-offline-cache directory", func() {
 			JustBeforeEach(func() {
-				mockCommand.EXPECT().Execute(buildDir, ioutil.Discard, gomock.Any(), "yarn", []string{"check"}).Return(yarnCheck)
+				gomock.InOrder(
+					mockCommand.EXPECT().Execute(buildDir, gomock.Any(), gomock.Any(), "yarn", "install", "--pure-lockfile", "--ignore-engines", "--cache-folder", filepath.Join(buildDir, ".cache/yarn")).Do(
+						func(_ string, _, _ io.Writer, _, _, _, _, _, _ string) {
+							Expect(os.Getenv("npm_config_nodedir")).To(Equal("test_node_home"))
+						}).Return(nil),
+					mockCommand.EXPECT().Execute(buildDir, ioutil.Discard, gomock.Any(), "yarn", "check").Return(yarnCheck),
+				)
 			})
 
 			It("tells the user it is running in online mode", func() {
-				Expect(y.Build(buildDir, cacheDir)).To(Succeed())
+				Expect(y.Build()).To(Succeed())
 				Expect(buffer.String()).To(ContainSubstring("Installing node modules (yarn.lock)"))
 				Expect(buffer.String()).To(ContainSubstring("Running yarn in online mode"))
 				Expect(buffer.String()).To(ContainSubstring("To run yarn in offline mode, see: https://yarnpkg.com/blog/2016/11/24/offline-mirror"))
 			})
 
-			It("runs yarn config", func() {
-				Expect(y.Build(buildDir, cacheDir)).To(Succeed())
-				Expect(yarnConfig).To(Equal(map[string]string{
-					"yarn-offline-mirror":         filepath.Join(cacheDir, "npm-packages-offline-cache"),
-					"yarn-offline-mirror-pruning": "true",
-				}))
-			})
-
 			It("runs yarn install", func() {
-				Expect(y.Build(buildDir, cacheDir)).To(Succeed())
-				Expect(yarnInstallArgs).To(Equal([]string{"yarn", "install", "--pure-lockfile", "--ignore-engines", "--cache-folder", filepath.Join(cacheDir, ".cache/yarn"), "--modules-folder", filepath.Join(buildDir, "node_modules")}))
+				Expect(y.Build()).To(Succeed())
 			})
 
 			Context("package.json matches yarn.lock", func() {
@@ -163,7 +147,7 @@ var _ = Describe("Yarn", func() {
 				})
 
 				It("reports the fact", func() {
-					Expect(y.Build(buildDir, cacheDir)).To(Succeed())
+					Expect(y.Build()).To(Succeed())
 					Expect(buffer.String()).To(ContainSubstring("yarn.lock and package.json match"))
 				})
 			})
@@ -174,7 +158,7 @@ var _ = Describe("Yarn", func() {
 				})
 
 				It("warns the user", func() {
-					Expect(y.Build(buildDir, cacheDir)).To(Succeed())
+					Expect(y.Build()).To(Succeed())
 					Expect(buffer.String()).To(ContainSubstring("**WARNING** yarn.lock is outdated"))
 				})
 			})

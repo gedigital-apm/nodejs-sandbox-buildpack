@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 )
 
@@ -33,15 +32,7 @@ func CopyDirectory(srcDir, destDir string) error {
 		src := filepath.Join(srcDir, f.Name())
 		dest := filepath.Join(destDir, f.Name())
 
-		if m := f.Mode(); m&os.ModeSymlink != 0 {
-			target, err := os.Readlink(src)
-			if err != nil {
-				return fmt.Errorf("Error while reading symlink '%s': %v", src, err)
-			}
-			if err := os.Symlink(target, dest); err != nil {
-				return fmt.Errorf("Error while creating '%s' as symlink to '%s': %v", dest, target, err)
-			}
-		} else if f.IsDir() {
+		if f.IsDir() {
 			err = os.MkdirAll(dest, f.Mode())
 			if err != nil {
 				return err
@@ -96,32 +87,6 @@ func ExtractZip(zipfile, destDir string) error {
 	}
 
 	return nil
-}
-
-func ExtractTarXz(tarfile, destDir string) error {
-	file, err := os.Open(tarfile)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	xz := xzReader(file)
-	defer xz.Close()
-	return extractTar(xz, destDir)
-}
-
-func xzReader(r io.Reader) io.ReadCloser {
-	rpipe, wpipe := io.Pipe()
-
-	cmd := exec.Command("xz", "--decompress", "--stdout")
-	cmd.Stdin = r
-	cmd.Stdout = wpipe
-
-	go func() {
-		err := cmd.Run()
-		wpipe.CloseWithError(err)
-	}()
-
-	return rpipe
 }
 
 // Gets the buildpack directory

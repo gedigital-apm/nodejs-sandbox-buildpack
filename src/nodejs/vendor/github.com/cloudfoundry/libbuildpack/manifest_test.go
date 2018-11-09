@@ -10,15 +10,14 @@ import (
 
 	"github.com/cloudfoundry/libbuildpack"
 	"github.com/cloudfoundry/libbuildpack/ansicleaner"
-	"gopkg.in/jarcoal/httpmock.v1"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"gopkg.in/jarcoal/httpmock.v1"
 )
 
 var _ = Describe("Manifest", func() {
 	var (
-		oldCfStack  string
 		manifest    *libbuildpack.Manifest
 		manifestDir string
 		err         error
@@ -29,9 +28,6 @@ var _ = Describe("Manifest", func() {
 	)
 
 	BeforeEach(func() {
-		oldCfStack = os.Getenv("CF_STACK")
-		os.Setenv("CF_STACK", "cflinuxfs2")
-
 		manifestDir = "fixtures/manifest/standard"
 		currentTime = time.Now()
 		httpmock.Reset()
@@ -39,7 +35,6 @@ var _ = Describe("Manifest", func() {
 		buffer = new(bytes.Buffer)
 		logger = libbuildpack.NewLogger(ansicleaner.New(buffer))
 	})
-	AfterEach(func() { err = os.Setenv("CF_STACK", oldCfStack); Expect(err).To(BeNil()) })
 
 	JustBeforeEach(func() {
 		manifest, err = libbuildpack.NewManifest(manifestDir, logger, currentTime)
@@ -52,69 +47,14 @@ var _ = Describe("Manifest", func() {
 		})
 	})
 
-	Describe("ApplyOverride", func() {
-		var depsDir string
-		BeforeEach(func() {
-			depsDir, err = ioutil.TempDir("", "libbuildpack_override")
-			Expect(err).ToNot(HaveOccurred())
-			Expect(os.Mkdir(filepath.Join(depsDir, "0"), 0755)).To(Succeed())
-			Expect(os.Mkdir(filepath.Join(depsDir, "1"), 0755)).To(Succeed())
-			Expect(os.Mkdir(filepath.Join(depsDir, "2"), 0755)).To(Succeed())
-
-			data := `---
-dotnet-core:
-  default_versions:
-  - name: node
-    version: 1.7.x
-  - name: thing
-    version: 9.3.x
-  dependencies:
-  - name: node
-    version: 1.7.6
-    cf_stacks: ['cflinuxfs2']
-  - name: thing
-    version: 9.3.6
-    cf_stacks: ['cflinuxfs2']
-ruby:
-  default_versions:
-  - name: node
-    version: 2.2.x
-  dependencies:
-  - name: node
-    version: 2.2.2
-    cf_stacks: ['cflinuxfs2']
-`
-			Expect(ioutil.WriteFile(filepath.Join(depsDir, "1", "override.yml"), []byte(data), 0644)).To(Succeed())
-		})
-
-		AfterEach(func() {
-			Expect(os.RemoveAll(depsDir)).To(Succeed())
-		})
-
-		It("updates default version", func() {
-			Expect(manifest.DefaultVersion("node")).To(Equal(libbuildpack.Dependency{Name: "node", Version: "6.9.4"}))
-
-			Expect(manifest.ApplyOverride(depsDir)).To(Succeed())
-
-			Expect(manifest.DefaultVersion("node")).To(Equal(libbuildpack.Dependency{Name: "node", Version: "1.7.6"}))
-		})
-
-		It("doesn't remove data which is not overriden", func() {
-			Expect(manifest.DefaultVersion("ruby")).To(Equal(libbuildpack.Dependency{Name: "ruby", Version: "2.3.3"}))
-
-			Expect(manifest.ApplyOverride(depsDir)).To(Succeed())
-
-			Expect(manifest.DefaultVersion("ruby")).To(Equal(libbuildpack.Dependency{Name: "ruby", Version: "2.3.3"}))
-		})
-
-		It("adds new default versions", func() {
-			Expect(manifest.ApplyOverride(depsDir)).To(Succeed())
-
-			Expect(manifest.DefaultVersion("thing")).To(Equal(libbuildpack.Dependency{Name: "thing", Version: "9.3.6"}))
-		})
-	})
-
 	Describe("CheckStackSupport", func() {
+		var (
+			oldCfStack string
+		)
+
+		BeforeEach(func() { oldCfStack = os.Getenv("CF_STACK") })
+		AfterEach(func() { err = os.Setenv("CF_STACK", oldCfStack); Expect(err).To(BeNil()) })
+
 		Context("Stack is supported", func() {
 			BeforeEach(func() {
 				manifestDir = "fixtures/manifest/stacks"
@@ -145,40 +85,16 @@ ruby:
 					Expect(manifest.CheckStackSupport()).To(Succeed())
 				})
 			})
-
-			Context("by the whole manifest", func() {
-				BeforeEach(func() {
-					manifestDir = "fixtures/manifest/packaged-with-stack"
-					err = os.Setenv("CF_STACK", "cflinuxfs2")
-					Expect(err).To(BeNil())
-				})
-				It("returns nil", func() {
-					Expect(manifest.CheckStackSupport()).To(Succeed())
-				})
-			})
 		})
 
 		Context("Stack is not supported", func() {
-			Context("stacks specified in dependencies", func() {
-				BeforeEach(func() {
-					err = os.Setenv("CF_STACK", "notastack")
-					Expect(err).To(BeNil())
-				})
-
-				It("returns an error", func() {
-					Expect(manifest.CheckStackSupport()).To(MatchError(errors.New("required stack notastack was not found")))
-				})
+			BeforeEach(func() {
+				err = os.Setenv("CF_STACK", "notastack")
+				Expect(err).To(BeNil())
 			})
-			Context("stack specified in top-level of manifest", func() {
-				BeforeEach(func() {
-					manifestDir = "fixtures/manifest/packaged-with-stack"
-					err = os.Setenv("CF_STACK", "notastack")
-					Expect(err).To(BeNil())
-				})
 
-				It("returns an error", func() {
-					Expect(manifest.CheckStackSupport()).To(MatchError(errors.New("required stack notastack was not found")))
-				})
+			It("returns nil", func() {
+				Expect(manifest.CheckStackSupport()).To(MatchError(errors.New("required stack notastack was not found")))
 			})
 		})
 	})
@@ -210,68 +126,10 @@ ruby:
 
 	Describe("AllDependencyVersions", func() {
 		It("returns all the versions of the dependency", func() {
-			versions := manifest.AllDependencyVersions("dotnet-runtime")
+			versions := manifest.AllDependencyVersions("dotnet-framework")
+			Expect(err).To(BeNil())
+
 			Expect(versions).To(Equal([]string{"1.0.0", "1.0.1", "1.0.3", "1.1.0"}))
-		})
-
-		Context("CF_STACK = xenial", func() {
-			BeforeEach(func() {
-				manifestDir = "fixtures/manifest/stacks"
-				os.Setenv("CF_STACK", "xenial")
-			})
-			It("limits to dependencies matching CF_STACK", func() {
-				versions := manifest.AllDependencyVersions("thing")
-				Expect(versions).To(Equal([]string{"1"}))
-			})
-		})
-
-		Context("CF_STACK = cflinuxfs2", func() {
-			BeforeEach(func() {
-				manifestDir = "fixtures/manifest/stacks"
-				os.Setenv("CF_STACK", "cflinuxfs2")
-			})
-			It("limits to dependencies matching CF_STACK", func() {
-				versions := manifest.AllDependencyVersions("thing")
-				Expect(versions).To(Equal([]string{"1", "2"}))
-			})
-		})
-
-		Context("CF_STACK = empty string", func() {
-			BeforeEach(func() {
-				manifestDir = "fixtures/manifest/stacks"
-				os.Setenv("CF_STACK", "cflinuxfs2")
-			})
-			It("lists all dependencies matching name", func() {
-				versions := manifest.AllDependencyVersions("thing")
-				Expect(versions).To(Equal([]string{"1", "2"}))
-			})
-		})
-
-		Context("stack specified in top-level of manifest", func() {
-			BeforeEach(func() {
-				manifestDir = "fixtures/manifest/packaged-with-stack"
-			})
-
-			Context("stack matches", func() {
-				BeforeEach(func() {
-					os.Setenv("CF_STACK", "cflinuxfs2")
-				})
-			    It("returns all versions of the dependency", func() {
-					versions := manifest.AllDependencyVersions("jruby")
-					Expect(versions).To(Equal([]string{"9.3.4", "9.3.5", "9.4.4"}))
-			    })
-			})
-
-			Context("stack does not match", func() {
-				BeforeEach(func() {
-					os.Setenv("CF_STACK", "inanestack")
-				})
-
-				It("returns an empty list", func() {
-					versions := manifest.AllDependencyVersions("jruby")
-					Expect(versions).To(BeEmpty())
-				})
-			})
 		})
 	})
 
@@ -291,19 +149,608 @@ ruby:
 			Expect(os.RemoveAll(manifestDir)).To(Succeed())
 		})
 
-		Context("uncached buildpack", func() {
+		Context("uncached", func() {
 			It("is false", func() {
 				Expect(manifest.IsCached()).To(BeFalse())
 			})
 		})
 
-		Context("cached buildpack", func() {
+		Context("cached", func() {
 			BeforeEach(func() {
 				dependenciesDir := filepath.Join(manifestDir, "dependencies")
 				Expect(os.MkdirAll(dependenciesDir, 0755)).To(Succeed())
 			})
 			It("is true", func() {
 				Expect(manifest.IsCached()).To(BeTrue())
+			})
+		})
+	})
+
+	Describe("FetchDependency", func() {
+		var tmpdir, outputFile string
+
+		BeforeEach(func() {
+			manifestDir = "fixtures/manifest/fetch"
+			tmpdir, err = ioutil.TempDir("", "downloads")
+			Expect(err).To(BeNil())
+			outputFile = filepath.Join(tmpdir, "out.tgz")
+		})
+		AfterEach(func() { err = os.RemoveAll(tmpdir); Expect(err).To(BeNil()) })
+
+		Context("uncached", func() {
+			Context("url exists and matches md5", func() {
+				BeforeEach(func() {
+					httpmock.RegisterResponder("GET", "https://example.com/dependencies/thing-1-linux-x64.tgz",
+						httpmock.NewStringResponder(200, "exciting binary data"))
+				})
+
+				It("downloads the file to the requested location", func() {
+					err = manifest.FetchDependency(libbuildpack.Dependency{Name: "thing", Version: "1"}, outputFile)
+
+					Expect(err).To(BeNil())
+					Expect(ioutil.ReadFile(outputFile)).To(Equal([]byte("exciting binary data")))
+				})
+
+				It("makes intermediate directories", func() {
+					outputFile = filepath.Join(tmpdir, "notexist", "out.tgz")
+					err = manifest.FetchDependency(libbuildpack.Dependency{Name: "thing", Version: "1"}, outputFile)
+
+					Expect(err).To(BeNil())
+					Expect(ioutil.ReadFile(outputFile)).To(Equal([]byte("exciting binary data")))
+				})
+			})
+
+			Context("url returns 404", func() {
+				BeforeEach(func() {
+					httpmock.RegisterResponder("GET", "https://example.com/dependencies/thing-1-linux-x64.tgz",
+						httpmock.NewStringResponder(404, "exciting binary data"))
+				})
+				It("raises error", func() {
+					err = manifest.FetchDependency(libbuildpack.Dependency{Name: "thing", Version: "1"}, outputFile)
+
+					Expect(err).ToNot(BeNil())
+				})
+
+				It("alerts the user that the url could not be downloaded", func() {
+					err = manifest.FetchDependency(libbuildpack.Dependency{Name: "thing", Version: "1"}, outputFile)
+					Expect(err).NotTo(BeNil())
+					Expect(err.Error()).To(ContainSubstring("could not download: 404"))
+					Expect(buffer.String()).ToNot(ContainSubstring("to ["))
+				})
+
+				It("outputfile does not exist", func() {
+					err = manifest.FetchDependency(libbuildpack.Dependency{Name: "thing", Version: "1"}, outputFile)
+
+					Expect(outputFile).ToNot(BeAnExistingFile())
+				})
+			})
+
+			Context("url exists but does not match md5", func() {
+				BeforeEach(func() {
+					httpmock.RegisterResponder("GET", "https://example.com/dependencies/thing-1-linux-x64.tgz",
+						httpmock.NewStringResponder(200, "other data"))
+				})
+				It("raises error", func() {
+					err = manifest.FetchDependency(libbuildpack.Dependency{Name: "thing", Version: "1"}, outputFile)
+
+					Expect(err).ToNot(BeNil())
+				})
+				It("outputfile does not exist", func() {
+					err = manifest.FetchDependency(libbuildpack.Dependency{Name: "thing", Version: "1"}, outputFile)
+
+					Expect(outputFile).ToNot(BeAnExistingFile())
+				})
+			})
+
+		})
+
+		Context("cached", func() {
+			var dependenciesDir string
+
+			BeforeEach(func() {
+				var err error
+				manifestDir, err = ioutil.TempDir("", "cached")
+				Expect(err).To(BeNil())
+
+				dependenciesDir = filepath.Join(manifestDir, "dependencies")
+				os.MkdirAll(dependenciesDir, 0755)
+
+				data, err := ioutil.ReadFile("fixtures/manifest/fetch/manifest.yml")
+				Expect(err).To(BeNil())
+
+				err = ioutil.WriteFile(filepath.Join(manifestDir, "manifest.yml"), data, 0644)
+				Expect(err).To(BeNil())
+
+				outputFile = filepath.Join(tmpdir, "out.tgz")
+			})
+
+			Context("url exists cached on disk under old format and matches md5", func() {
+				BeforeEach(func() {
+					ioutil.WriteFile(filepath.Join(dependenciesDir, "https___example.com_dependencies_thing-2-linux-x64.tgz"), []byte("awesome binary data"), 0644)
+				})
+				It("copies the cached file to outputFile", func() {
+					err = manifest.FetchDependency(libbuildpack.Dependency{Name: "thing", Version: "2"}, outputFile)
+
+					Expect(err).To(BeNil())
+					Expect(ioutil.ReadFile(outputFile)).To(Equal([]byte("awesome binary data")))
+				})
+				It("makes intermediate directories", func() {
+					outputFile = filepath.Join(tmpdir, "notexist", "out.tgz")
+					err = manifest.FetchDependency(libbuildpack.Dependency{Name: "thing", Version: "2"}, outputFile)
+
+					Expect(err).To(BeNil())
+					Expect(ioutil.ReadFile(outputFile)).To(Equal([]byte("awesome binary data")))
+				})
+			})
+
+			Context("url exists cached on disk under new format and matches md5", func() {
+				BeforeEach(func() {
+					os.MkdirAll(filepath.Join(dependenciesDir, "c4fef5682adf1c19c7f9b76fde9d0ecb"), 0755)
+					Expect(ioutil.WriteFile(filepath.Join(dependenciesDir, "c4fef5682adf1c19c7f9b76fde9d0ecb", "thing-2-linux-x64.tgz"), []byte("awesome binary data"), 0644)).To(Succeed())
+				})
+				It("copies the cached file to outputFile", func() {
+					err = manifest.FetchDependency(libbuildpack.Dependency{Name: "thing", Version: "2"}, outputFile)
+
+					Expect(err).To(BeNil())
+					Expect(ioutil.ReadFile(outputFile)).To(Equal([]byte("awesome binary data")))
+				})
+				It("makes intermediate directories", func() {
+					outputFile = filepath.Join(tmpdir, "notexist", "out.tgz")
+					err = manifest.FetchDependency(libbuildpack.Dependency{Name: "thing", Version: "2"}, outputFile)
+
+					Expect(err).To(BeNil())
+					Expect(ioutil.ReadFile(outputFile)).To(Equal([]byte("awesome binary data")))
+				})
+			})
+
+			Context("url exists cached on disk under old format and does not match md5", func() {
+				BeforeEach(func() {
+					ioutil.WriteFile(filepath.Join(dependenciesDir, "https___example.com_dependencies_thing-2-linux-x64.tgz"), []byte("different binary data"), 0644)
+				})
+				It("raises error", func() {
+					err = manifest.FetchDependency(libbuildpack.Dependency{Name: "thing", Version: "2"}, outputFile)
+
+					Expect(err).ToNot(BeNil())
+				})
+				It("outputfile does not exist", func() {
+					err = manifest.FetchDependency(libbuildpack.Dependency{Name: "thing", Version: "2"}, outputFile)
+
+					Expect(outputFile).ToNot(BeAnExistingFile())
+				})
+			})
+
+			Context("url exists cached on disk under new format and does not match md5", func() {
+				BeforeEach(func() {
+					os.MkdirAll(filepath.Join(dependenciesDir, "c4fef5682adf1c19c7f9b76fde9d0ecb"), 0755)
+					Expect(ioutil.WriteFile(filepath.Join(dependenciesDir, "c4fef5682adf1c19c7f9b76fde9d0ecb", "thing-2-linux-x64.tgz"), []byte("different binary data"), 0644)).To(Succeed())
+				})
+				It("raises error", func() {
+					err = manifest.FetchDependency(libbuildpack.Dependency{Name: "thing", Version: "2"}, outputFile)
+
+					Expect(err).ToNot(BeNil())
+				})
+				It("outputfile does not exist", func() {
+					err = manifest.FetchDependency(libbuildpack.Dependency{Name: "thing", Version: "2"}, outputFile)
+
+					Expect(outputFile).ToNot(BeAnExistingFile())
+				})
+			})
+
+			Context("url is not cached on disk", func() {
+				It("raises error", func() {
+					err = manifest.FetchDependency(libbuildpack.Dependency{Name: "thing", Version: "2"}, outputFile)
+
+					Expect(err).ToNot(BeNil())
+				})
+			})
+		})
+	})
+
+	Describe("InstallDependency", func() {
+		var outputDir string
+
+		BeforeEach(func() {
+			manifestDir = "fixtures/manifest/fetch"
+			outputDir, err = ioutil.TempDir("", "downloads")
+			Expect(err).To(BeNil())
+		})
+
+		AfterEach(func() {
+			err = os.RemoveAll(outputDir)
+			Expect(err).To(BeNil())
+		})
+
+		Context("uncached", func() {
+			Context("url exists and matches sha256", func() {
+				BeforeEach(func() {
+					tgzContents, err := ioutil.ReadFile("fixtures/thing.tgz")
+					Expect(err).To(BeNil())
+					httpmock.RegisterResponder("GET", "https://example.com/dependencies/real_tar_file-3-linux-x64.tgz",
+						httpmock.NewStringResponder(200, string(tgzContents)))
+				})
+
+				It("logs the name and version of the dependency", func() {
+					err = manifest.InstallDependency(libbuildpack.Dependency{Name: "real_tar_file", Version: "3"}, outputDir)
+					Expect(err).To(BeNil())
+
+					Expect(buffer.String()).To(ContainSubstring("-----> Installing real_tar_file 3"))
+				})
+
+				It("extracts a file at the root", func() {
+					err = manifest.InstallDependency(libbuildpack.Dependency{Name: "real_tar_file", Version: "3"}, outputDir)
+					Expect(err).To(BeNil())
+
+					Expect(filepath.Join(outputDir, "root.txt")).To(BeAnExistingFile())
+					Expect(ioutil.ReadFile(filepath.Join(outputDir, "root.txt"))).To(Equal([]byte("root\n")))
+				})
+
+				It("extracts a nested file", func() {
+					err = manifest.InstallDependency(libbuildpack.Dependency{Name: "real_tar_file", Version: "3"}, outputDir)
+					Expect(err).To(BeNil())
+
+					Expect(filepath.Join(outputDir, "thing", "bin", "file2.exe")).To(BeAnExistingFile())
+					Expect(ioutil.ReadFile(filepath.Join(outputDir, "thing", "bin", "file2.exe"))).To(Equal([]byte("progam2\n")))
+				})
+
+				It("makes intermediate directories", func() {
+					outputDir = filepath.Join(outputDir, "notexist")
+					err = manifest.InstallDependency(libbuildpack.Dependency{Name: "real_tar_file", Version: "3"}, outputDir)
+					Expect(err).To(BeNil())
+
+					Expect(filepath.Join(outputDir, "thing", "bin", "file2.exe")).To(BeAnExistingFile())
+					Expect(ioutil.ReadFile(filepath.Join(outputDir, "thing", "bin", "file2.exe"))).To(Equal([]byte("progam2\n")))
+				})
+
+				Context("version is NOT latest in version line", func() {
+					BeforeEach(func() {
+						tgzContents, err := ioutil.ReadFile("fixtures/thing.tgz")
+						Expect(err).To(BeNil())
+						httpmock.RegisterResponder("GET", "https://example.com/dependencies/thing-6.2.2-linux-x64.tgz",
+							httpmock.NewStringResponder(200, string(tgzContents)))
+					})
+
+					It("warns the user", func() {
+						patchWarning := "**WARNING** A newer version of thing is available in this buildpack. " +
+							"Please adjust your app to use version 6.2.3 instead of version 6.2.2 as soon as possible. " +
+							"Old versions of thing are only provided to assist in migrating to newer versions.\n"
+
+						err = manifest.InstallDependency(libbuildpack.Dependency{Name: "thing", Version: "6.2.2"}, outputDir)
+						Expect(err).To(BeNil())
+						Expect(buffer.String()).To(ContainSubstring(patchWarning))
+					})
+				})
+
+				Context("version is latest in version line", func() {
+					BeforeEach(func() {
+						tgzContents, err := ioutil.ReadFile("fixtures/thing.tgz")
+						Expect(err).To(BeNil())
+						httpmock.RegisterResponder("GET", "https://example.com/dependencies/thing-6.2.3-linux-x64.tgz",
+							httpmock.NewStringResponder(200, string(tgzContents)))
+					})
+
+					It("does not warn the user", func() {
+						err = manifest.InstallDependency(libbuildpack.Dependency{Name: "thing", Version: "6.2.3"}, outputDir)
+						Expect(err).To(BeNil())
+						Expect(buffer.String()).NotTo(ContainSubstring("newer version"))
+					})
+				})
+
+				Context("version is not semver", func() {
+					BeforeEach(func() {
+						tgzContents, err := ioutil.ReadFile("fixtures/thing.tgz")
+						Expect(err).To(BeNil())
+						httpmock.RegisterResponder("GET", "https://buildpacks.cloudfoundry.org/dependencies/godep/godep-v79-linux-x64-9e37ce0f.tgz",
+							httpmock.NewStringResponder(200, string(tgzContents)))
+					})
+
+					It("does not warn the user", func() {
+						err = manifest.InstallDependency(libbuildpack.Dependency{Name: "godep", Version: "v79"}, outputDir)
+						Expect(err).To(BeNil())
+						Expect(buffer.String()).NotTo(ContainSubstring("newer version"))
+					})
+				})
+
+				Context("version has an EOL, version line is major", func() {
+					const warning = "**WARNING** thing 4.x will no longer be available in new buildpacks released after 2017-03-01."
+					BeforeEach(func() {
+						tgzContents, err := ioutil.ReadFile("fixtures/thing.tgz")
+						Expect(err).To(BeNil())
+						httpmock.RegisterResponder("GET", "https://example.com/dependencies/thing-4.6.1-linux-x64.tgz",
+							httpmock.NewStringResponder(200, string(tgzContents)))
+					})
+
+					Context("less than 30 days in the future", func() {
+						BeforeEach(func() {
+							currentTime, err = time.Parse("2006-01-02", "2017-02-15")
+							Expect(err).To(BeNil())
+						})
+
+						It("warns the user", func() {
+							err = manifest.InstallDependency(libbuildpack.Dependency{Name: "thing", Version: "4.6.1"}, outputDir)
+							Expect(err).To(BeNil())
+							Expect(buffer.String()).To(ContainSubstring(warning))
+						})
+
+						Context("dependency EOL has a link associated with it", func() {
+							It("includes the link in the warning", func() {
+								err = manifest.InstallDependency(libbuildpack.Dependency{Name: "thing", Version: "4.6.1"}, outputDir)
+								Expect(err).To(BeNil())
+								Expect(buffer.String()).To(ContainSubstring("See: http://example.com/eol-policy"))
+							})
+						})
+
+						Context("dependency EOL does not have a link associated with it", func() {
+							BeforeEach(func() {
+								tgzContents, err := ioutil.ReadFile("fixtures/thing.tgz")
+								Expect(err).To(BeNil())
+								httpmock.RegisterResponder("GET", "https://example.com/dependencies/thing-5.2.3-linux-x64.tgz",
+									httpmock.NewStringResponder(200, string(tgzContents)))
+							})
+
+							It("does not include the word 'See:' in the warning", func() {
+								err = manifest.InstallDependency(libbuildpack.Dependency{Name: "thing", Version: "5.2.3"}, outputDir)
+								Expect(err).To(BeNil())
+								Expect(buffer.String()).ToNot(ContainSubstring("See:"))
+							})
+						})
+					})
+					Context("in the past", func() {
+						BeforeEach(func() {
+							currentTime, err = time.Parse("2006-01-02", "2017-12-15")
+							Expect(err).To(BeNil())
+						})
+						It("warns the user", func() {
+							err = manifest.InstallDependency(libbuildpack.Dependency{Name: "thing", Version: "4.6.1"}, outputDir)
+							Expect(err).To(BeNil())
+							Expect(buffer.String()).To(ContainSubstring(warning))
+						})
+					})
+					Context("more than 30 days in the future", func() {
+						BeforeEach(func() {
+							currentTime, err = time.Parse("2006-01-02", "2016-10-15")
+							Expect(err).To(BeNil())
+						})
+						It("does not warn the user", func() {
+							err = manifest.InstallDependency(libbuildpack.Dependency{Name: "thing", Version: "4.6.1"}, outputDir)
+							Expect(err).To(BeNil())
+							Expect(buffer.String()).ToNot(ContainSubstring(warning))
+						})
+					})
+				})
+
+				Context("version has an EOL, version line is major + minor", func() {
+					const warning = "**WARNING** thing 6.2.x will no longer be available in new buildpacks released after 2018-04-01"
+					BeforeEach(func() {
+						tgzContents, err := ioutil.ReadFile("fixtures/thing.tgz")
+						Expect(err).To(BeNil())
+						httpmock.RegisterResponder("GET", "https://example.com/dependencies/thing-6.2.3-linux-x64.tgz",
+							httpmock.NewStringResponder(200, string(tgzContents)))
+					})
+
+					Context("less than 30 days in the future", func() {
+						BeforeEach(func() {
+							currentTime, err = time.Parse("2006-01-02", "2018-03-29")
+							Expect(err).To(BeNil())
+						})
+						It("warns the user", func() {
+							err = manifest.InstallDependency(libbuildpack.Dependency{Name: "thing", Version: "6.2.3"}, outputDir)
+							Expect(err).To(BeNil())
+							Expect(buffer.String()).To(ContainSubstring(warning))
+						})
+					})
+					Context("in the past", func() {
+						BeforeEach(func() {
+							currentTime, err = time.Parse("2006-01-02", "2019-12-30")
+							Expect(err).To(BeNil())
+						})
+						It("warns the user", func() {
+							err = manifest.InstallDependency(libbuildpack.Dependency{Name: "thing", Version: "6.2.3"}, outputDir)
+							Expect(err).To(BeNil())
+							Expect(buffer.String()).To(ContainSubstring(warning))
+						})
+					})
+					Context("more than 30 days in the future", func() {
+						BeforeEach(func() {
+							currentTime, err = time.Parse("2006-01-02", "2018-01-15")
+							Expect(err).To(BeNil())
+						})
+						It("does not warn the user", func() {
+							err = manifest.InstallDependency(libbuildpack.Dependency{Name: "thing", Version: "6.2.3"}, outputDir)
+							Expect(err).To(BeNil())
+							Expect(buffer.String()).ToNot(ContainSubstring(warning))
+						})
+					})
+				})
+
+				Context("version has an EOL, version line non semver", func() {
+					const warning = "**WARNING** nonsemver abc-1.2.3-def-4.5.6 will no longer be available in new buildpacks released after 2018-04-01"
+					BeforeEach(func() {
+						tgzContents, err := ioutil.ReadFile("fixtures/thing.tgz")
+						Expect(err).To(BeNil())
+						httpmock.RegisterResponder("GET", "https://example.com/dependencies/nonsemver-abc-1.2.3-def-4.5.6-linux-x64.tgz",
+							httpmock.NewStringResponder(200, string(tgzContents)))
+					})
+
+					Context("less than 30 days in the future", func() {
+						BeforeEach(func() {
+							currentTime, err = time.Parse("2006-01-02", "2018-03-29")
+							Expect(err).To(BeNil())
+						})
+						It("warns the user", func() {
+							err = manifest.InstallDependency(libbuildpack.Dependency{Name: "nonsemver", Version: "abc-1.2.3-def-4.5.6"}, outputDir)
+							Expect(err).To(BeNil())
+							Expect(buffer.String()).To(ContainSubstring(warning))
+						})
+					})
+					Context("in the past", func() {
+						BeforeEach(func() {
+							currentTime, err = time.Parse("2006-01-02", "2019-12-30")
+							Expect(err).To(BeNil())
+						})
+						It("warns the user", func() {
+							err = manifest.InstallDependency(libbuildpack.Dependency{Name: "nonsemver", Version: "abc-1.2.3-def-4.5.6"}, outputDir)
+							Expect(err).To(BeNil())
+							Expect(buffer.String()).To(ContainSubstring(warning))
+						})
+					})
+					Context("more than 30 days in the future", func() {
+						BeforeEach(func() {
+							currentTime, err = time.Parse("2006-01-02", "2018-01-15")
+							Expect(err).To(BeNil())
+						})
+						It("does not warn the user", func() {
+							err = manifest.InstallDependency(libbuildpack.Dependency{Name: "nonsemver", Version: "abc-1.2.3-def-4.5.6"}, outputDir)
+							Expect(err).To(BeNil())
+							Expect(buffer.String()).ToNot(ContainSubstring(warning))
+						})
+					})
+				})
+
+				Context("version does not have an EOL", func() {
+					const warning = "**WARNING** real_tar_file 3 will no longer be available in new buildpacks released after"
+					BeforeEach(func() {
+						tgzContents, err := ioutil.ReadFile("fixtures/thing.tgz")
+						Expect(err).To(BeNil())
+						httpmock.RegisterResponder("GET", "https://example.com/dependencies/real_tar_file-3-linux-x64.tgz",
+							httpmock.NewStringResponder(200, string(tgzContents)))
+					})
+
+					It("does not warn the user", func() {
+						err = manifest.InstallDependency(libbuildpack.Dependency{Name: "real_tar_file", Version: "3"}, outputDir)
+						Expect(err).To(BeNil())
+						Expect(buffer.String()).ToNot(ContainSubstring(warning))
+					})
+				})
+			})
+
+			Context("url exists but does not match sha256", func() {
+				BeforeEach(func() {
+					httpmock.RegisterResponder("GET", "https://example.com/dependencies/thing-1-linux-x64.tgz",
+						httpmock.NewStringResponder(200, "other data"))
+				})
+
+				It("logs the name and version of the dependency", func() {
+					err = manifest.InstallDependency(libbuildpack.Dependency{Name: "thing", Version: "1"}, outputDir)
+					Expect(err).ToNot(BeNil())
+
+					Expect(buffer.String()).To(ContainSubstring("-----> Installing thing 1"))
+				})
+
+				It("outputfile does not exist", func() {
+					err = manifest.InstallDependency(libbuildpack.Dependency{Name: "thing", Version: "1"}, outputDir)
+					Expect(err).ToNot(BeNil())
+
+					Expect(filepath.Join(outputDir, "root.txt")).ToNot(BeAnExistingFile())
+				})
+			})
+		})
+
+		Context("cached", func() {
+			var (
+				dependenciesDir string
+				outputDir       string
+			)
+
+			BeforeEach(func() {
+				manifestDir, err = ioutil.TempDir("", "cached")
+				Expect(err).To(BeNil())
+
+				dependenciesDir = filepath.Join(manifestDir, "dependencies")
+				os.MkdirAll(dependenciesDir, 0755)
+
+				data, err := ioutil.ReadFile("fixtures/manifest/fetch/manifest.yml")
+				Expect(err).To(BeNil())
+
+				err = ioutil.WriteFile(filepath.Join(manifestDir, "manifest.yml"), data, 0644)
+				Expect(err).To(BeNil())
+
+				outputDir, err = ioutil.TempDir("", "downloads")
+				Expect(err).To(BeNil())
+			})
+
+			Context("url exists cached on disk and matches sha256", func() {
+				BeforeEach(func() {
+					libbuildpack.CopyFile("fixtures/thing.zip", filepath.Join(dependenciesDir, "https___example.com_dependencies_real_zip_file-3-linux-x64.zip"))
+				})
+
+				It("logs the name and version of the dependency", func() {
+					err = manifest.InstallDependency(libbuildpack.Dependency{Name: "real_zip_file", Version: "3"}, outputDir)
+					Expect(err).To(BeNil())
+
+					Expect(buffer.String()).To(ContainSubstring("-----> Installing real_zip_file 3"))
+				})
+
+				It("extracts a file at the root", func() {
+					err = manifest.InstallDependency(libbuildpack.Dependency{Name: "real_zip_file", Version: "3"}, outputDir)
+					Expect(err).To(BeNil())
+
+					Expect(filepath.Join(outputDir, "root.txt")).To(BeAnExistingFile())
+					Expect(ioutil.ReadFile(filepath.Join(outputDir, "root.txt"))).To(Equal([]byte("root\n")))
+				})
+
+				It("extracts a nested file", func() {
+					err = manifest.InstallDependency(libbuildpack.Dependency{Name: "real_zip_file", Version: "3"}, outputDir)
+					Expect(err).To(BeNil())
+
+					Expect(filepath.Join(outputDir, "thing", "bin", "file2.exe")).To(BeAnExistingFile())
+					Expect(ioutil.ReadFile(filepath.Join(outputDir, "thing", "bin", "file2.exe"))).To(Equal([]byte("progam2\n")))
+				})
+
+				It("makes intermediate directories", func() {
+					outputDir = filepath.Join(outputDir, "notexist")
+					err = manifest.InstallDependency(libbuildpack.Dependency{Name: "real_zip_file", Version: "3"}, outputDir)
+					Expect(err).To(BeNil())
+
+					Expect(filepath.Join(outputDir, "thing", "bin", "file2.exe")).To(BeAnExistingFile())
+					Expect(ioutil.ReadFile(filepath.Join(outputDir, "thing", "bin", "file2.exe"))).To(Equal([]byte("progam2\n")))
+				})
+			})
+		})
+	})
+
+	Describe("InstallOnlyVersion", func() {
+		var outputDir string
+
+		BeforeEach(func() {
+			manifestDir = "fixtures/manifest/fetch"
+			outputDir, err = ioutil.TempDir("", "downloads")
+			Expect(err).To(BeNil())
+		})
+		AfterEach(func() { err = os.RemoveAll(outputDir); Expect(err).To(BeNil()) })
+
+		Context("there is only one version of the dependency", func() {
+			BeforeEach(func() {
+				tgzContents, err := ioutil.ReadFile("fixtures/thing.tgz")
+				Expect(err).To(BeNil())
+				httpmock.RegisterResponder("GET", "https://example.com/dependencies/real_tar_file-3-linux-x64.tgz",
+					httpmock.NewStringResponder(200, string(tgzContents)))
+			})
+
+			It("installs", func() {
+				outputDir = filepath.Join(outputDir, "notexist")
+				err = manifest.InstallOnlyVersion("real_tar_file", outputDir)
+				Expect(err).To(BeNil())
+
+				Expect(filepath.Join(outputDir, "thing", "bin", "file2.exe")).To(BeAnExistingFile())
+				Expect(ioutil.ReadFile(filepath.Join(outputDir, "thing", "bin", "file2.exe"))).To(Equal([]byte("progam2\n")))
+			})
+		})
+
+		Context("there is more than one version of the dependency", func() {
+			It("fails", func() {
+				outputDir = filepath.Join(outputDir, "notexist")
+				err = manifest.InstallOnlyVersion("thing", outputDir)
+				Expect(err).NotTo(BeNil())
+				Expect(err.Error()).To(Equal("more than one version of thing found"))
+			})
+		})
+
+		Context("there are no versions of the dependency", func() {
+			It("fails", func() {
+				outputDir = filepath.Join(outputDir, "notexist")
+				err = manifest.InstallOnlyVersion("not_a_dependency", outputDir)
+				Expect(err).NotTo(BeNil())
+				Expect(err.Error()).To(Equal("no versions of not_a_dependency found"))
 			})
 		})
 	})
@@ -340,6 +787,7 @@ ruby:
 			BeforeEach(func() { manifestDir = "fixtures/manifest/duplicate" })
 			It("returns an error", func() {
 				_, err := manifest.DefaultVersion("bower")
+				Expect(err).ToNot(BeNil())
 				Expect(err.Error()).To(Equal("found 2 default versions for bower"))
 			})
 		})
@@ -347,35 +795,8 @@ ruby:
 		Context("requested name does not exist", func() {
 			It("returns an error", func() {
 				_, err := manifest.DefaultVersion("notexist")
+				Expect(err).ToNot(BeNil())
 				Expect(err.Error()).To(Equal("no default version for notexist"))
-			})
-		})
-
-		Context("stack specified in top-level of manifest", func() {
-			BeforeEach(func() {
-				manifestDir = "fixtures/manifest/packaged-with-stack"
-			})
-
-			Context("stack matches", func() {
-				BeforeEach(func() {
-					os.Setenv("CF_STACK", "cflinuxfs2")
-				})
-				It("returns all versions of the dependency", func() {
-					dep, err := manifest.DefaultVersion("jruby")
-					Expect(err).To(BeNil())
-					Expect(dep).To(Equal(libbuildpack.Dependency{Name: "jruby", Version: "9.3.5"}))
-				})
-			})
-
-			Context("stack does not match", func() {
-				BeforeEach(func() {
-					os.Setenv("CF_STACK", "inanestack")
-				})
-
-				It("returns an error", func() {
-					_, err := manifest.DefaultVersion("jruby")
-					Expect(err.Error()).To(Equal("no match found for 9.3.x in []"))
-				})
 			})
 		})
 	})
@@ -487,85 +908,6 @@ ruby:
 			It("Does not log anything", func() {
 				manifest.StoreBuildpackMetadata(cacheDir)
 				Expect(buffer.String()).To(Equal(""))
-			})
-		})
-	})
-
-	Describe("GetEntry", func() {
-		var depToFind libbuildpack.Dependency
-
-		Context("dependency matches", func() {
-			BeforeEach(func() {
-			    depToFind = libbuildpack.Dependency{"jruby", "9.3.5"}
-			})
-
-			Context("top-level manifest stack exists", func() {
-				BeforeEach(func() {
-					manifestDir = "fixtures/manifest/packaged-with-stack"
-				})
-
-				Context("top-level manifest stack matches", func() {
-					BeforeEach(func() {
-						os.Setenv("CF_STACK", "cflinuxfs2")
-					})
-
-					It("returns matched dependency", func() {
-						entry, err := manifest.GetEntry(depToFind)
-						Expect(err).To(BeNil())
-						Expect(entry.Dependency).To(Equal(depToFind))
-					})
-				})
-
-				Context("top-level manifest stack does not match", func() {
-					BeforeEach(func() {
-						os.Setenv("CF_STACK", "inanestack")
-					})
-
-					It("returns an error", func() {
-						_, err := manifest.GetEntry(depToFind)
-						Expect(err).To(HaveOccurred())
-					})
-				})
-			})
-
-			Context("top-level manifest stack does not exist", func() {
-				BeforeEach(func() {
-					manifestDir = "fixtures/manifest/standard"
-				})
-
-				Context("dependency stack matches", func() {
-					BeforeEach(func() {
-						os.Setenv("CF_STACK", "cflinuxfs2")
-					})
-
-					It("returns matched dependency", func() {
-						entry, err := manifest.GetEntry(depToFind)
-						Expect(err).To(BeNil())
-						Expect(entry.Dependency).To(Equal(depToFind))
-					})
-				})
-
-				Context("dependency stack does not match", func() {
-					BeforeEach(func() {
-						os.Setenv("CF_STACK", "inanestack")
-					})
-
-					It("returns an error", func() {
-						_, err := manifest.GetEntry(depToFind)
-						Expect(err).To(HaveOccurred())
-					})
-				})
-			})
-
-			Context("dependency does not match ", func() {
-				BeforeEach(func() {
-					depToFind = libbuildpack.Dependency{"inanedep", "11"}
-				})
-
-				It("returns an error", func() {
-					_, err := manifest.GetEntry(depToFind)
-					Expect(err).To(HaveOccurred())
-				})
 			})
 		})
 	})

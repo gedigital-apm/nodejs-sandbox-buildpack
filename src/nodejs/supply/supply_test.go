@@ -23,7 +23,6 @@ var _ = Describe("Supply", func() {
 	var (
 		err             error
 		buildDir        string
-		cacheDir        string
 		depsDir         string
 		depsIdx         string
 		depDir          string
@@ -34,7 +33,6 @@ var _ = Describe("Supply", func() {
 		mockYarn        *MockYarn
 		mockNPM         *MockNPM
 		mockManifest    *MockManifest
-		mockInstaller   *MockInstaller
 		mockCommand     *MockCommand
 		installNode     func(libbuildpack.Dependency, string)
 		installOnlyYarn func(string, string)
@@ -42,8 +40,6 @@ var _ = Describe("Supply", func() {
 
 	BeforeEach(func() {
 		depsDir, err = ioutil.TempDir("", "nodejs-buildpack.deps.")
-		Expect(err).To(BeNil())
-		cacheDir, err = ioutil.TempDir("", "nodejs-buildpack.cache.")
 		Expect(err).To(BeNil())
 
 		buildDir, err = ioutil.TempDir("", "nodejs-buildpack.build.")
@@ -61,7 +57,6 @@ var _ = Describe("Supply", func() {
 
 		mockCtrl = gomock.NewController(GinkgoT())
 		mockManifest = NewMockManifest(mockCtrl)
-		mockInstaller = NewMockInstaller(mockCtrl)
 		mockCommand = NewMockCommand(mockCtrl)
 		mockYarn = NewMockYarn(mockCtrl)
 		mockNPM = NewMockNPM(mockCtrl)
@@ -89,17 +84,16 @@ var _ = Describe("Supply", func() {
 			Expect(err).To(BeNil())
 		}
 
-		args := []string{buildDir, cacheDir, depsDir, depsIdx}
+		args := []string{buildDir, "", depsDir, depsIdx}
 		stager := libbuildpack.NewStager(args, logger, &libbuildpack.Manifest{})
 
 		supplier = &supply.Supplier{
-			Stager:    stager,
-			Yarn:      mockYarn,
-			NPM:       mockNPM,
-			Log:       logger,
-			Manifest:  mockManifest,
-			Installer: mockInstaller,
-			Command:   mockCommand,
+			Stager:   stager,
+			Yarn:     mockYarn,
+			NPM:      mockNPM,
+			Log:      logger,
+			Manifest: mockManifest,
+			Command:  mockCommand,
 		}
 	})
 
@@ -286,9 +280,11 @@ var _ = Describe("Supply", func() {
 	})
 
 	Describe("InstallNode", func() {
+		var nodeInstallDir string
 		var nodeTmpDir string
 
 		BeforeEach(func() {
+			nodeInstallDir = filepath.Join(depsDir, depsIdx, "node")
 			nodeTmpDir, err = ioutil.TempDir("", "nodejs-buildpack.temp")
 			Expect(err).To(BeNil())
 		})
@@ -305,7 +301,7 @@ var _ = Describe("Supply", func() {
 
 			It("installs the correct version from the manifest", func() {
 				dep := libbuildpack.Dependency{Name: "node", Version: "4.8.3"}
-				mockInstaller.EXPECT().InstallDependency(dep, nodeTmpDir).Do(installNode).Return(nil)
+				mockManifest.EXPECT().InstallDependency(dep, nodeTmpDir).Do(installNode).Return(nil)
 
 				supplier.NodeVersion = "~>4"
 				err = supplier.InstallNode(nodeTmpDir)
@@ -314,7 +310,7 @@ var _ = Describe("Supply", func() {
 
 			It("handles '>=6.11.1 <7.0'", func() {
 				dep := libbuildpack.Dependency{Name: "node", Version: "6.11.1"}
-				mockInstaller.EXPECT().InstallDependency(dep, nodeTmpDir).Do(installNode).Return(nil)
+				mockManifest.EXPECT().InstallDependency(dep, nodeTmpDir).Do(installNode).Return(nil)
 
 				supplier.NodeVersion = ">=6.11.1 <7.0.0"
 				err = supplier.InstallNode(nodeTmpDir)
@@ -323,7 +319,7 @@ var _ = Describe("Supply", func() {
 
 			It("handles '>=6.11.1, <7.0'", func() {
 				dep := libbuildpack.Dependency{Name: "node", Version: "6.11.1"}
-				mockInstaller.EXPECT().InstallDependency(dep, nodeTmpDir).Do(installNode).Return(nil)
+				mockManifest.EXPECT().InstallDependency(dep, nodeTmpDir).Do(installNode).Return(nil)
 
 				supplier.NodeVersion = ">=6.11.1, <7.0"
 				err = supplier.InstallNode(nodeTmpDir)
@@ -332,7 +328,7 @@ var _ = Describe("Supply", func() {
 
 			It("creates a symlink in <depDir>/bin", func() {
 				dep := libbuildpack.Dependency{Name: "node", Version: "6.10.2"}
-				mockInstaller.EXPECT().InstallDependency(dep, nodeTmpDir).Do(installNode).Return(nil)
+				mockManifest.EXPECT().InstallDependency(dep, nodeTmpDir).Do(installNode).Return(nil)
 
 				supplier.NodeVersion = "6.10.*"
 				err = supplier.InstallNode(nodeTmpDir)
@@ -354,7 +350,7 @@ var _ = Describe("Supply", func() {
 			It("installs the default version from the manifest", func() {
 				dep := libbuildpack.Dependency{Name: "node", Version: "6.10.2"}
 				mockManifest.EXPECT().DefaultVersion("node").Return(dep, nil)
-				mockInstaller.EXPECT().InstallDependency(dep, nodeTmpDir).Do(installNode).Return(nil)
+				mockManifest.EXPECT().InstallDependency(dep, nodeTmpDir).Do(installNode).Return(nil)
 
 				supplier.NodeVersion = ""
 
@@ -373,7 +369,7 @@ var _ = Describe("Supply", func() {
 
 		Context("yarn version is unset", func() {
 			BeforeEach(func() {
-				mockInstaller.EXPECT().InstallOnlyVersion("yarn", yarnInstallDir).Do(installOnlyYarn).Return(nil)
+				mockManifest.EXPECT().InstallOnlyVersion("yarn", yarnInstallDir).Do(installOnlyYarn).Return(nil)
 
 				mockCommand.EXPECT().Execute(buildDir, gomock.Any(), gomock.Any(), "yarn", "--version").Do(func(_ string, buffer io.Writer, _ io.Writer, _ string, _ string) {
 					buffer.Write([]byte("0.32.5\n"))
@@ -407,7 +403,7 @@ var _ = Describe("Supply", func() {
 			BeforeEach(func() {
 				versions := []string{"0.32.5"}
 				mockManifest.EXPECT().AllDependencyVersions("yarn").Return(versions)
-				mockInstaller.EXPECT().InstallOnlyVersion("yarn", yarnInstallDir).Do(installOnlyYarn).Return(nil)
+				mockManifest.EXPECT().InstallOnlyVersion("yarn", yarnInstallDir).Do(installOnlyYarn).Return(nil)
 
 				mockCommand.EXPECT().Execute(buildDir, gomock.Any(), gomock.Any(), "yarn", "--version").Do(func(_ string, buffer io.Writer, _ io.Writer, _ string, _ string) {
 					buffer.Write([]byte("0.32.5\n"))
@@ -580,14 +576,14 @@ var _ = Describe("Supply", func() {
 			})
 			It("sets NPMRebuild to true", func() {
 				Expect(supplier.ReadPackageJSON()).To(Succeed())
-				Expect(supplier.IsVendored).To(BeTrue())
+				Expect(supplier.NPMRebuild).To(BeTrue())
 			})
 		})
 
 		Context("node_modules does not exist", func() {
 			It("sets NPMRebuild to false", func() {
 				Expect(supplier.ReadPackageJSON()).To(Succeed())
-				Expect(supplier.IsVendored).To(BeFalse())
+				Expect(supplier.NPMRebuild).To(BeFalse())
 			})
 		})
 
@@ -830,162 +826,86 @@ var _ = Describe("Supply", func() {
 		})
 	})
 
-	Describe("OverrideCacheFromApp", func() {
-		Context("cache dir has deprecated bower_components directory", func() {
-			BeforeEach(func() {
-				Expect(os.MkdirAll(filepath.Join(cacheDir, "bower_components", "subdir"), 0755)).To(Succeed())
-			})
-			It("deletes the deprecated directory", func() {
-				Expect(supplier.OverrideCacheFromApp()).To(Succeed())
-				Expect(filepath.Join(cacheDir, "bower_components", "subdir")).ToNot(BeADirectory())
-			})
-		})
-		Context("app has '.npm' directory", func() {
-			BeforeEach(func() {
-				Expect(os.MkdirAll(filepath.Join(buildDir, ".npm", "subdir"), 0755)).To(Succeed())
-			})
-			It("copies directory to cache", func() {
-				Expect(supplier.OverrideCacheFromApp()).To(Succeed())
-				Expect(filepath.Join(buildDir, ".npm", "subdir")).To(BeADirectory())
-				Expect(filepath.Join(cacheDir, ".npm", "subdir")).To(BeADirectory())
-			})
-		})
-		Context("app has '.cache/yarn' directory", func() {
-			BeforeEach(func() {
-				Expect(os.MkdirAll(filepath.Join(buildDir, ".cache", "yarn", "subdir"), 0755)).To(Succeed())
-			})
-			It("copies directory to cache", func() {
-				Expect(supplier.OverrideCacheFromApp()).To(Succeed())
-				Expect(filepath.Join(buildDir, ".cache", "yarn", "subdir")).To(BeADirectory())
-				Expect(filepath.Join(cacheDir, ".cache", "yarn", "subdir")).To(BeADirectory())
-			})
-		})
-	})
-
 	Describe("BuildDependencies", func() {
-		Context("using yarn", func() {
+		Context("yarn.lock exists", func() {
 			BeforeEach(func() {
 				supplier.UseYarn = true
-				mockYarn.EXPECT().Build(buildDir, cacheDir).DoAndReturn(func(string, string) error {
-					Expect(os.MkdirAll(filepath.Join(buildDir, "node_modules"), 0755)).To(Succeed())
-					return nil
+				mockYarn.EXPECT().Build().Return(nil)
+			})
+
+			It("runs yarn install", func() {
+				Expect(supplier.BuildDependencies()).To(Succeed())
+			})
+
+			Context("prebuild is specified", func() {
+				BeforeEach(func() {
+					supplier.PreBuild = "prescriptive"
+				})
+
+				It("runs the prebuild script", func() {
+					mockCommand.EXPECT().Execute(buildDir, gomock.Any(), gomock.Any(), "yarn", "run", "heroku-prebuild")
+					Expect(supplier.BuildDependencies()).To(Succeed())
+					Expect(buffer.String()).To(ContainSubstring("Running heroku-prebuild (yarn)"))
 				})
 			})
 
-			It("runs yarn build", func() {
-				Expect(supplier.BuildDependencies()).To(Succeed())
-			})
-
-			It("runs the prebuild script, when prebuild is specified", func() {
-				supplier.PreBuild = "prescriptive"
-				mockCommand.EXPECT().Execute(buildDir, gomock.Any(), gomock.Any(), "yarn", "run", "heroku-prebuild")
-				Expect(supplier.BuildDependencies()).To(Succeed())
-				Expect(buffer.String()).To(ContainSubstring("Running heroku-prebuild (yarn)"))
-			})
-
-			It("runs the postbuild script, when postbuild is specified", func() {
-				supplier.PostBuild = "descriptive"
-				mockCommand.EXPECT().Execute(buildDir, gomock.Any(), gomock.Any(), "yarn", "run", "heroku-postbuild")
-				Expect(supplier.BuildDependencies()).To(Succeed())
-				Expect(buffer.String()).To(ContainSubstring("Running heroku-postbuild (yarn)"))
-			})
-		})
-
-		Describe("using npm", func() {
-			BeforeEach(func() {
-				supplier.UseYarn = false
-			})
-
-			It("runs npm build when node_modules does not exist", func() {
-				supplier.IsVendored = false
-				mockNPM.EXPECT().Build(gomock.Any(), gomock.Any()).DoAndReturn(func(string, string) error {
-					Expect(os.MkdirAll(filepath.Join(buildDir, "node_modules"), 0755)).To(Succeed())
-					return nil
+			Context("postbuild is specified", func() {
+				BeforeEach(func() {
+					supplier.PostBuild = "descriptive"
 				})
-				Expect(supplier.BuildDependencies()).To(Succeed())
-			})
 
-			It("runs npm rebuild, when node_modules exists", func() {
-				supplier.IsVendored = true
-				mockNPM.EXPECT().Rebuild(buildDir).Return(nil)
-				Expect(supplier.BuildDependencies()).To(Succeed())
-			})
-
-			It("runs the prebuild script, when prebuild is specified", func() {
-				supplier.PreBuild = "prescriptive"
-				mockNPM.EXPECT().Build(gomock.Any(), gomock.Any()).DoAndReturn(func(string, string) error {
-					Expect(os.MkdirAll(filepath.Join(buildDir, "node_modules"), 0755)).To(Succeed())
-					return nil
+				It("runs the postbuild script", func() {
+					mockCommand.EXPECT().Execute(buildDir, gomock.Any(), gomock.Any(), "yarn", "run", "heroku-postbuild")
+					Expect(supplier.BuildDependencies()).To(Succeed())
+					Expect(buffer.String()).To(ContainSubstring("Running heroku-postbuild (yarn)"))
 				})
-				mockCommand.EXPECT().Execute(buildDir, gomock.Any(), gomock.Any(), "npm", "run", "heroku-prebuild", "--if-present")
+			})
+		})
+
+		Context("yarn.lock does not exist", func() {
+			It("runs npm install", func() {
+				mockNPM.EXPECT().Build().Return(nil)
 				Expect(supplier.BuildDependencies()).To(Succeed())
-				Expect(buffer.String()).To(ContainSubstring("Running heroku-prebuild (npm)"))
 			})
 
-			It("runs the postbuild script, when postbuild is specified", func() {
-				supplier.PostBuild = "descriptive"
-				mockNPM.EXPECT().Build(buildDir, cacheDir).DoAndReturn(func(string, string) error {
-					Expect(os.MkdirAll(filepath.Join(buildDir, "node_modules"), 0755)).To(Succeed())
-					return nil
+			Context("prebuild is specified", func() {
+				BeforeEach(func() {
+					mockNPM.EXPECT().Build().Return(nil)
+					supplier.PreBuild = "prescriptive"
 				})
-				mockCommand.EXPECT().Execute(buildDir, gomock.Any(), gomock.Any(), "npm", "run", "heroku-postbuild", "--if-present")
-				Expect(supplier.BuildDependencies()).To(Succeed())
-				Expect(buffer.String()).To(ContainSubstring("Running heroku-postbuild (npm)"))
+
+				It("runs the prebuild script", func() {
+					mockCommand.EXPECT().Execute(buildDir, gomock.Any(), gomock.Any(), "npm", "run", "heroku-prebuild", "--if-present")
+					Expect(supplier.BuildDependencies()).To(Succeed())
+					Expect(buffer.String()).To(ContainSubstring("Running heroku-prebuild (npm)"))
+				})
+			})
+
+			Context("npm rebuild is specified", func() {
+				BeforeEach(func() {
+					mockNPM.EXPECT().Rebuild().Return(nil)
+					supplier.NPMRebuild = true
+				})
+
+				It("runs npm rebuild ", func() {
+					Expect(supplier.BuildDependencies()).To(Succeed())
+					Expect(buffer.String()).To(ContainSubstring("Prebuild detected (node_modules already exists)"))
+				})
+			})
+
+			Context("postbuild is specified", func() {
+				BeforeEach(func() {
+					mockNPM.EXPECT().Build().Return(nil)
+					supplier.PostBuild = "descriptive"
+				})
+
+				It("runs the postbuild script", func() {
+					mockCommand.EXPECT().Execute(buildDir, gomock.Any(), gomock.Any(), "npm", "run", "heroku-postbuild", "--if-present")
+					Expect(supplier.BuildDependencies()).To(Succeed())
+					Expect(buffer.String()).To(ContainSubstring("Running heroku-postbuild (npm)"))
+				})
 			})
 		})
-	})
-
-	Describe("MoveDependencyArtifacts", func() {
-		Context("when app is already vendored", func() {
-			BeforeEach(func() {
-				supplier.IsVendored = true
-				Expect(os.MkdirAll(filepath.Join(buildDir, "node_modules", "a", "b"), 0755)).To(Succeed())
-				Expect(supplier.MoveDependencyArtifacts()).To(Succeed())
-			})
-
-			It("does NOT moves node_modules into deps directory after installing them", func() {
-				Expect(filepath.Join(buildDir, "node_modules", "a", "b")).To(BeADirectory())
-				Expect(filepath.Join(depDir, "node_modules")).ToNot(BeADirectory())
-			})
-
-			It("does NOT set NODE_PATH environment file", func() {
-				Expect(filepath.Join(depDir, "env", "NODE_PATH")).ToNot(BeAnExistingFile())
-			})
-
-			It("does NOT sets NODE_PATH environment variable", func() {
-				_, nodePathSet := os.LookupEnv("NODE_PATH")
-				Expect(nodePathSet).To(BeFalse())
-			})
-		})
-
-		Context("when app is NOT vendored", func() {
-			BeforeEach(func() {
-				supplier.IsVendored = false
-				Expect(os.MkdirAll(filepath.Join(buildDir, "node_modules", "a", "b"), 0755)).To(Succeed())
-				Expect(supplier.MoveDependencyArtifacts()).To(Succeed())
-			})
-
-			It("moves node_modules and .yarnrc into deps directory after installing them", func() {
-				Expect(filepath.Join(buildDir, "node_modules")).ToNot(BeADirectory())
-				Expect(filepath.Join(depDir, "node_modules", "a", "b")).To(BeADirectory())
-			})
-
-			It("sets NODE_PATH environment file", func() {
-				Expect(ioutil.ReadFile(filepath.Join(depDir, "env", "NODE_PATH"))).To(Equal([]byte(filepath.Join(depDir, "node_modules"))))
-			})
-
-			It("sets NODE_PATH environment variable", func() {
-				Expect(os.Getenv("NODE_PATH")).To(Equal(filepath.Join(depDir, "node_modules")))
-			})
-
-			It("does not error if no node_modules are installed", func() {
-				Expect(os.RemoveAll(filepath.Join(buildDir, "node_modules"))).To(Succeed())
-
-				Expect(supplier.MoveDependencyArtifacts()).To(Succeed())
-				Expect(filepath.Join(buildDir, "node_modules")).ToNot(BeADirectory())
-			})
-		})
-
 	})
 
 	Describe("ListDependencies", func() {
@@ -1175,16 +1095,6 @@ var _ = Describe("Supply", func() {
 
 			Expect(string(contents)).To(ContainSubstring("export NODE_HOME=" + filepath.Join("$DEPS_DIR", depsIdx, "node")))
 			Expect(string(contents)).To(ContainSubstring("export NODE_ENV=${NODE_ENV:-production}"))
-			nodePathString := `
-if [ ! -d "$HOME/node_modules" ]; then
-	export NODE_PATH=${NODE_PATH:-"$DEPS_DIR/14/node_modules"}
-	ln -s "$DEPS_DIR/14/node_modules" "$HOME/node_modules"
-else
-	export NODE_PATH=${NODE_PATH:-"$HOME/node_modules"}
-fi
-export PATH=$PATH:"$HOME/bin":$NODE_PATH/.bin
-`
-			Expect(string(contents)).To(ContainSubstring(nodePathString))
 		})
 	})
 })

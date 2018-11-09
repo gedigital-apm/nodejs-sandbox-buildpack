@@ -35,13 +35,12 @@ var _ = Describe("Packager", func() {
 | name | version | cf_stacks |
 |-|-|-|
 | ruby | 1.2.3 | cflinuxfs2 |
-| ruby | 1.2.3 | cflinuxfs3 |
 
 Default binary versions:
 
 | name | version |
 |-|-|
-| ruby | 1.2.3 |
+| ruby | 2.4.1 |
 `))
 		})
 
