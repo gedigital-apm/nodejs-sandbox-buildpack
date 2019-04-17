@@ -10,9 +10,9 @@ var appdynamics = require("appdynamics").profile({
   debug: true,
   libagent: true,
   logging: {
-    logfiles: [{
-      level: 'TRACE',
-      outputType: 'console'
+    'logfiles': [{
+      'level': 'TRACE',
+      'outputType': 'console'
     }]
   }
 });
