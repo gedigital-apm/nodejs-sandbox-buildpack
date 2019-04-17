@@ -1,5 +1,3 @@
-var fs = require('fs')
-var child_process = require('child_process');
 var appdynamics = require("appdynamics").profile({
   controllerHostName: process.env.APPDYNAMICS_CONTROLLER_HOST_NAME,
   controllerPort: process.env.APPDYNAMICS_CONTROLLER_PORT,
@@ -9,8 +7,12 @@ var appdynamics = require("appdynamics").profile({
   applicationName: process.env.APPDYNAMICS_AGENT_APPLICATION_NAME,
   tierName: process.env.APPDYNAMICS_AGENT_TIER_NAME,
   nodeName: process.env.APPDYNAMICS_AGENT_NODE_NAME,
-  debug: true
+  debug: true,
+  libagent: true,
+  logging: {logfiles:[{level: 'TRACE',outputType: 'console'}]}
 });
+var fs = require('fs')
+var child_process = require('child_process');
 var express = require("express");
 var logfmt = require("logfmt");
 var app = express();

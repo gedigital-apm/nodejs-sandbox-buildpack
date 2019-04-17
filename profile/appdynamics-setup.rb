@@ -6,7 +6,6 @@ require 'json'
 
 vcap = JSON.load(ENV['VCAP_SERVICES']) rescue {}
 credentials = nil
-logParams = {logfiles: [{level: 'TRACE',outputType: 'console'}]}
 
 offering_name = vcap.keys.select { |k| k =~ /app(\-)?dynamics/ }.first
 if offering_name
@@ -25,8 +24,6 @@ if credentials
   f.puts "export APPDYNAMICS_CONTROLLER_SSL_ENABLED=#{credentials['ssl-enabled']}" if credentials['ssl-enabled']
   f.puts "export APPDYNAMICS_AGENT_ACCOUNT_ACCESS_KEY=#{credentials['account-access-key']}" if credentials['account-access-key']
   f.puts "export APPDYNAMICS_AGENT_APPLICATION_NAME=#{credentials['application-name']}" if credentials['application-name']
-  f.puts "export libagent=true"
-  f.puts "export logging=#{logParams}"
 
   vcap = JSON.load(ENV['VCAP_APPLICATION']) rescue {}
   if vcap['application_name']
