@@ -9,7 +9,12 @@ var appdynamics = require("appdynamics").profile({
   nodeName: process.env.APPDYNAMICS_AGENT_NODE_NAME,
   debug: true,
   libagent: true,
-  logging: {logfiles:[{level: 'TRACE',outputType: 'console'}]}
+  logging: {
+    logfiles: [{
+      level: 'TRACE',
+      outputType: 'console'
+    }]
+  }
 });
 var fs = require('fs')
 var child_process = require('child_process');
