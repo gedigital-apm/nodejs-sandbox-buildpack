@@ -27,7 +27,8 @@ if credentials
 
   vcap = JSON.load(ENV['VCAP_APPLICATION']) rescue {}
   if vcap['application_name']
-    f.puts "export APPDYNAMICS_AGENT_TIER_NAME=#{vcap['application_name']}"
-    f.puts "export APPDYNAMICS_AGENT_NODE_NAME=#{vcap['application_name']}:\$CF_INSTANCE_INDEX"
+    appd_name = vcap['application_name'].to_s.gsub!(/-NEW/, "") 
+    f.puts "export APPDYNAMICS_AGENT_TIER_NAME=#{appd_name}"
+    f.puts "export APPDYNAMICS_AGENT_NODE_NAME=#{appd_name}:\$CF_INSTANCE_INDEX"
   end
 end
